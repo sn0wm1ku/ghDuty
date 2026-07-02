@@ -1,26 +1,26 @@
 # ghDuty
 
-**GitHub notification duty** — a Claude Code plugin that runs as an automated
-agent: it works your **GitHub notification inbox** (the comment/event-level
-things actually directed at you — mentions, review requests, assignments,
-replies on threads you're in) across all your repos and **handles each on its
-own**, no per-item confirmation:
+**GitHub duty** — a Claude Code plugin that runs as an automated agent: it builds
+the queue of GitHub work **actually waiting on you** across all repos — PRs
+awaiting your review, issues/PRs assigned to you, and issues/PRs that mention you
+— and **handles each on its own, in parallel**, no per-item confirmation:
 
 - **A question** → replies with the answer.
 - **A change request** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, so it lands in that repo's `.workaholic/tickets/todo/` queue and is wired to `/drive`.
 - **A review request** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
 - **Tickets created this run** → optionally pings you on Slack.
 
-It reads **unread** notifications, handles each, and **marks it read** when done
-— read-state is the idempotency, so nothing is handled twice and a thread only
-comes back when it gets new activity. No timestamps, no issue-level `mentions:`
-search (which misses review-requests, assignments, and threads you commented on).
-Designed to run on a schedule.
+Discovery uses **durable state queries** (`review-requested`, `assignee`,
+`mentions` — all open), not the notification inbox, which is ephemeral and drops
+assigned work and anything you've already read even if it isn't done. It's
+**idempotent by its own reply signature**: a thread stays "done" while it carries
+a ghDuty reply with nothing after it, and becomes actionable again when someone
+replies after that. No timestamps. Designed to run on a schedule.
 
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) **v2.1.110+** (needed for plugin dependencies)
-- [`gh` CLI](https://cli.github.com/) installed and authenticated (`gh auth login`). The token needs notification access — the `repo` scope covers it (verify with `gh api /notifications`).
+- [`gh` CLI](https://cli.github.com/) installed and authenticated (`gh auth login`), with `repo` scope.
 - A **working folder** where repos live / get cloned (see below).
 - Two other plugins, **auto-installed as dependencies** (see below):
   - `workaholic` — provides `/ticket`, `/drive`, etc.
@@ -63,12 +63,12 @@ or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).
 
-Each run reads your unread notifications and **handles them in parallel — one
-subagent per notification** — replying, ticketing, or reviewing per what each is,
-then marking it read. On an interactive run with several items you can be offered
-an `AskUserQuestion` checkbox list to pick which to handle (unticked ones stay
-unread and resurface next time); a scheduled run handles them all. It acts only
-on repos you own or collaborate on.
+Each run builds your queue (review-requested + assigned + mentioned, open) and
+**handles the items in parallel — one subagent per item** — replying, ticketing,
+or reviewing per what each is. On an interactive run the queue can be offered as
+an `AskUserQuestion` checkbox list to pick which to handle; a scheduled run
+handles them all. It skips threads it has already signed (idempotency) and acts
+only on repos you own or collaborate on.
 
 Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
 · co-authored by Claude (<model>)` — crediting the plugin and the Claude model
@@ -125,13 +125,12 @@ rest of the workflow works without any Slack config.
 
 ## How it avoids double-handling
 
-There is no timestamp. Discovery is your GitHub notification inbox, and
-**read-state is the idempotency**: ghDuty only processes **unread** notifications
-and marks each **read** after it has handled or triaged it — never before, so it
-can't mark something done without processing it. A handled thread stays read
-until it gets new activity, which flips it back to unread — exactly when it
-should be handled again. Items you leave unticked on an interactive run stay
-unread.
+There is no timestamp and it doesn't rely on notification read-state (which would
+drop assigned/read-but-undone work). Every comment ghDuty posts carries its
+signature, and **the signature is the idempotency**: before acting on a thread a
+subagent checks whether a ghDuty reply is already there with no newer comment
+after it, and skips if so. A thread becomes actionable again only when someone
+replies after ghDuty's last comment — exactly when it should be re-handled.
 
 ## License
 
