@@ -1,6 +1,6 @@
 {
   "name": "ghduty",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "GitHub mention duty — automated agent that checks issues/PRs that @-mention you across all repos and handles each action request itself: reply directly, /ticket on change requests, /code-review on review requests, optional Slack notify on pending tickets. First run sets a baseline; later runs handle only new activity. Built to run on a schedule.",
   "author": {
     "name": "sn0wm1ku",

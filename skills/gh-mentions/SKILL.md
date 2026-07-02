@@ -70,11 +70,20 @@ it. Classify what it wants:
 
 ## Step 4 — handle it automatically
 
-Act without asking. Post replies and open tickets as the classification dictates:
+Act without asking. Post replies and open tickets as the classification dictates.
+
+**Every comment the plugin posts must end with this signature**, so it's clearly
+plugin-generated and easy to find and delete later (issue/PR comments are freely
+editable and deletable by the author):
+
+```
+\n\n---\n<sub>🤖 auto-posted by [ghDuty](https://github.com/sn0wm1ku/ghDuty)</sub>
+```
 
 ```bash
-gh issue comment <number> -R <owner/repo> --body "<reply>"
-gh pr comment    <number> -R <owner/repo> --body "<reply>"
+SIG=$'\n\n---\n<sub>🤖 auto-posted by [ghDuty](https://github.com/sn0wm1ku/ghDuty)</sub>'
+gh issue comment <number> -R <owner/repo> --body "<reply>$SIG"
+gh pr comment    <number> -R <owner/repo> --body "<reply>$SIG"
 ```
 
 Act only on repos you own or collaborate on. If a mention is on a repo you don't
