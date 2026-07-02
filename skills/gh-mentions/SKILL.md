@@ -213,6 +213,12 @@ clone the repo on demand, make a ticket branch, run `/ticket` inside it, then pu
    - `mcp__plugin_github_github__create_branch` — branch `ghduty/ticket-<issue#>-<slug>` from the default branch (remote name, not subject to the local branch hook).
    - `mcp__plugin_github_github__create_or_update_file` — commit the ticket **at the same canonical path** `.workaholic/tickets/todo/<user>/<file>.md` (so the target repo's `/drive` finds it), raw content.
 
+   **cwd caveat (observed):** a subagent's bash cwd may not stay pinned to `$WT`
+   across calls, so invoking `/ticket` can run against the wrong dir. If you can't
+   reliably keep cwd in the worktree, do the code exploration yourself and
+   **hand-author the ticket in workaholic's exact format** (frontmatter enums +
+   `todo/<user>/<ts>-*.md` path) — the file is what matters, not the skill call.
+
 3. **Clean up the worktree**: `git worktree remove --force "$WT"` (the ticket now
    lives on the remote branch via the MCP push).
 
