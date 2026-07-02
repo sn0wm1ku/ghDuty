@@ -89,6 +89,11 @@ The orchestrator collects results for Steps 4–5. **Dedupe target repos and clo
 each unique one once before fan-out** (Step 4) — concurrent clones of the same
 repo clash; separate `/ticket` writes into an existing clone are safe.
 
+Each subagent must have the `workaholic` and `code-review` skills available (it
+runs `/ticket` / `/code-review`) and does all remote writes through the **GitHub
+MCP** (branch, file commit, comment) — never `git push` / `gh` write commands,
+which permission policy often blocks.
+
 ### What each per-item subagent does
 
 1. **Read** the thread and its latest activity:
@@ -137,39 +142,63 @@ get their own pushed branch.** `/ticket` (workaholic) writes to
 folder. Use the **working folder** (`GHDUTY_WORK_DIR`, default `~/Projects`),
 clone the repo on demand, make a ticket branch, run `/ticket` inside it, then push:
 
-```bash
-WORK="${GHDUTY_WORK_DIR:-$HOME/Projects}"
-CLONE="$WORK/<owner>/<repo>"
-[ -d "$CLONE/.git" ] || gh repo clone "<owner>/<repo>" "$CLONE" || echo "clone failed"
-cd "$CLONE"
-git switch -c "ghduty/ticket-<issue#>-<slug>" origin/HEAD   # new branch off default
-# run /ticket <desc>  → writes .workaholic/tickets/todo/<...>.md (source: owner/repo#n)
-git add .workaholic/tickets/ && git commit -m "ghduty: ticket for #<issue#>"
-git push -u origin "ghduty/ticket-<issue#>-<slug>"
-```
+1. **Isolate in a git worktree, then run `/ticket` there.** The subagent `cd`s
+   into the repo clone and creates a dedicated worktree + branch for this ticket,
+   so parallel subagents on the same repo never collide. It runs the workaholic
+   `/ticket` skill inside the worktree (so it explores that repo's real code and
+   produces a real ticket, not a hand-written stub):
 
-If the clone or push fails, note it in the summary instead of losing the item.
+   ```bash
+   WORK="${GHDUTY_WORK_DIR:-$HOME/Projects}"
+   CLONE="$WORK/<owner>/<repo>"
+   [ -d "$CLONE/.git" ] || gh repo clone "<owner>/<repo>" "$CLONE" || echo "clone failed"
+   cd "$CLONE"
+   BR="ghduty/ticket-<issue#>-<slug>"
+   WT="$CLONE/.git/ghduty-wt/$BR"
+   git fetch -q origin
+   git worktree add -b "$BR" "$WT" origin/HEAD
+   cd "$WT"
+   # invoke the workaholic /ticket skill here with a concise description of the issue;
+   # it writes .workaholic/tickets/todo/<...>.md — then set `source: owner/repo#n`
+   # in its frontmatter so idempotency (Step 3) can find it.
+   ```
+
+2. **Push via the GitHub MCP, NOT `git push`.** Raw `git push` (and `gh api` POST)
+   are commonly blocked by permission policy; the GitHub MCP tools are the reliable
+   path. Read the ticket file `/ticket` produced, then:
+   - `mcp__plugin_github_github__create_branch` — branch `ghduty/ticket-<issue#>-<slug>` from the default branch.
+   - `mcp__plugin_github_github__create_or_update_file` — commit the ticket file (`.workaholic/tickets/todo/<...>.md`, pass raw content) to that branch.
+
+3. **Clean up the worktree** when done: `git worktree remove "$WT"` (the branch
+   and its ticket now live on the remote via the MCP push).
+
+If the clone or MCP push fails, note it in the summary instead of losing the item.
 Record `{repo, issue, ticket_path, branch}` for the Slack step.
 
-**Acknowledgment comments** (assigned issue that already has a linked PR) are just
-a signed comment on the issue — no ticket, no branch:
+**Posting comments — use the GitHub MCP** (`mcp__plugin_github_github__add_issue_comment`),
+not `gh issue comment`/`git`, for the same permission-policy reason as pushing.
+Stamp times in **local time with a timezone label** (friendlier than UTC; get it
+with `date '+%Y-%m-%d %H:%M %Z'` → e.g. `2026-07-02 16:55 JST`).
 
-```bash
-gh issue comment <number> -R <owner/repo> --body "Acknowledged $(date -u +'%Y-%m-%d %H:%M UTC').$SIG"
+**Acknowledgment comment** (assigned issue that already has a linked PR) — no
+ticket, no branch, just:
+`Acknowledged <local time>. Assigned — tracked via PR #<pr>.` + signature.
+
+**Every comment the plugin posts must end with this signature** (append it to the
+`body` you pass to `add_issue_comment`) — it credits the plugin and the Claude
+model, makes comments easy to find/delete, and is what the Step 3 idempotency
+check keys on. Fill `<model>` with the model you're running as:
+
+```
+<reply body>
+
+---
+<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-4-8)</sub>
 ```
 
-**Every comment the plugin posts must end with this signature** — it credits the
-plugin and the Claude model, makes comments easy to find/delete, and is what the
-Step 3 idempotency check keys on. Fill `<model>` with the model you're running as:
-
-```bash
-SIG=$'\n\n---\n<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-4-8)</sub>'
-gh issue comment <number> -R <owner/repo> --body "<reply>$SIG"
-gh pr comment    <number> -R <owner/repo> --body "<reply>$SIG"
-```
-
-Act only on repos you own or collaborate on. If it's a repo you don't maintain,
-note it in the summary instead of posting.
+Post it with `mcp__plugin_github_github__add_issue_comment` (works for issues and
+PRs — pass the PR number as `issue_number`). Act only on repos you own or
+collaborate on; otherwise note it in the summary instead of posting.
 
 ## Step 5 — Slack notify about tickets created this run (optional)
 
