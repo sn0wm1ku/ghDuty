@@ -6,7 +6,7 @@ state across all repos and, in parallel:
 
 - **Assigned issue that already has a linked PR** (the osbr repos auto-open a PR when you're assigned) → leaves a signed acknowledgment comment; the PR is handled by the PR rule.
 - **Assigned issue with no PR** (an idea/discussion) → opens a `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, **pushes a ticket branch**, and Slacks you to `/drive` it.
-- **Assigned PR** → closed: skipped; open with implementation: skipped for now (testing phase).
+- **Assigned PR** → closed: skipped; open: reads the PR **and its linked issue** (the objective/to-do usually lives in the issue, not the PR), finds the gap, and opens a ticket to fill it (ack comment instead if the PR already satisfies the issue).
 - **Mentions you** → replies to every one, unless the mentioning *comment* is >2 years old (judged by the comment's date, not the issue's).
 - **Review requested** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
 - **Tickets created this run** → optionally pings you on Slack (with the pushed branch).

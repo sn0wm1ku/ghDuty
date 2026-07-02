@@ -14,7 +14,8 @@ the record) and handles each item in parallel by subtype:
   → leave a signed acknowledgment comment; the PR is handled by the PR rule.
 - **assigned issue with no PR** (an idea/discussion) → open a ticket in the repo's
   clone, push a ticket branch, and Slack you to `/drive` it.
-- **assigned PR** → closed: skip; open (in progress): skip for now (testing phase).
+- **assigned PR** → closed: skip; open: read the PR *and its linked issue* (the
+  objective lives in the issue), find the gap, open a ticket to fill it.
 - **mention** → reply (skip if the mentioning comment is >2 years old).
 - **review request** → `/code-review`, post findings.
 
@@ -112,7 +113,7 @@ its subtype. An item can be in more than one query; do all that apply.
 |---|---|
 | **assigned ISSUE with a linked PR** (the osbr repos auto-open a PR when you're assigned; you're already assigned on that PR) | Leave an **acknowledgment comment** on the issue: `Acknowledged <UTC date time>.` (signed). The linked PR is handled by the assigned-PR rule below. |
 | **assigned ISSUE with no PR** (usually an idea/discussion — still needs a response) | Open a **ticket** in the repo's clone, **create + push a new branch** for the ticket, then **Slack** to drive it (Step 5). |
-| **assigned PR** | **Closed → skip.** **Open (implementation in progress) → skip for now** (we're in a testing phase; future runs will handle these). |
+| **assigned PR** | **Closed → skip.** **Open → gap-fill:** read the PR diff *and its linked issue* — the objective/to-do usually lives in the issue, not the PR. Identify what the issue asks that the PR hasn't done yet, and open a **ticket** (clone + pushed branch + Slack, same as an idea-issue) describing the gap to fill. If the PR already fully satisfies the issue, leave a signed ack comment instead. |
 | **review-requested**, or a comment asking for review | Run `/code-review` on that PR, post the findings as a reply. |
 | **mentioned**, and the mention asks something | Reply — answer a question, or ticket + reply if it's a change request. **Skip if the mentioning comment itself is >2 years old** (judge by the comment's `created_at`, not the issue's; a stale @ isn't worth answering). |
 | Genuinely nothing to do (pure FYI, an ack, already resolved) | Skip. |
