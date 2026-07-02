@@ -19,8 +19,9 @@ the record) and handles each item in parallel by subtype:
 - **mention** → reply (skip if the mentioning comment is >2 years old).
 - **review request** → `/code-review`, post findings.
 
-Idempotent by its own signature (a thread with a ghDuty reply and nothing newer
-is done) and, for idea-issue tickets, by the ticket already existing in the clone.
+Idempotent by its own signature: every action (ack, reply, review, ticket) leaves
+a signed comment on the thread, so a thread with a ghDuty comment and nothing newer
+is "done" — one uniform check for every item type, no local state, no timestamp.
 
 ## Prerequisite
 
@@ -101,15 +102,18 @@ which permission policy often blocks.
    gh issue view <number> -R <owner/repo> --comments   # Issue
    gh pr view    <number> -R <owner/repo> --comments   # PullRequest
    ```
-2. **Idempotency check** —
-   - *mention / review / assigned-issue-with-PR (ack)*: if the thread already has
-     a ghDuty signature (`auto-posted by sn0wm1ku/ghDuty`) with **no newer comment
-     after it**, it's handled → return `skipped` (don't re-comment / re-ack).
-   - *assigned idea-issue (ticket)*: if a ticket with frontmatter
-     `source: owner/repo#number` already exists anywhere under the repo's
-     `.workaholic/tickets/` (todo/<user>/, icebox/, abandoned/, archive/) —
-     e.g. `grep -rl "source: owner/repo#n" .workaholic/tickets/` — it's filed →
-     return `skipped`.
+2. **Idempotency check — the ghDuty signature in the thread, for every item type.**
+   Every action ghDuty takes (ack, reply, review findings, *and* filing a ticket)
+   ends by posting a **signed comment on the issue/PR**. So "have I acted on this?"
+   is answered uniformly: does the thread already contain a comment with the ghDuty
+   signature (`auto-posted by sn0wm1ku/ghDuty`) and **no newer comment after it**?
+   If yes → return `skipped`.
+
+   Do **not** rely on finding the ticket file locally: the ticket is pushed to a
+   remote `ghduty/ticket-*` branch, never checked out into the clone's working
+   tree, so a local `.workaholic/tickets/` grep won't see it — the signed comment
+   is the durable, remote marker instead. A thread becomes actionable again only
+   when someone comments after ghDuty's signed comment (i.e. real follow-up).
 3. **Classify** (table below) and **handle** per Step 4, signed.
 4. **Return** the structured result.
 
@@ -187,6 +191,11 @@ clone the repo on demand, make a ticket branch, run `/ticket` inside it, then pu
 3. **Clean up the worktree**: `git worktree remove --force "$WT"` (the ticket now
    lives on the remote branch via the MCP push).
 
+4. **Post a signed comment on the source issue** (via `add_issue_comment`) noting
+   the ticket was filed and the branch name. **This comment is mandatory** — it's
+   what Step 3 idempotency keys on, so a ticket without its signed comment would be
+   re-filed next run. Format: `Acknowledged <local time>. Filed a ticket — branch \`ghduty/ticket-…\`, queued for /drive.` + signature.
+
 If the clone or MCP push fails, note it in the summary instead of losing the item.
 Record `{repo, issue, ticket_path, branch}` for the Slack step.
 
@@ -246,9 +255,11 @@ skipped-not-mine / left-unticked / notified.
 
 ## Notes
 
-- **Idempotency is the signature**, not notification read-state: a thread is
-  "done" while it carries a ghDuty reply with nothing after it, and becomes
-  actionable again when someone comments after that reply — exactly right.
+- **Idempotency is the signed comment in the thread** — not a timestamp, not
+  notification read-state, not a local ticket file. Every action (including
+  filing a ticket) leaves a signed comment, so the same check covers all types.
+  Don't look for the ticket locally: it lives on a remote `ghduty/ticket-*` branch
+  that's never checked out into the clone.
 - Durable queries catch assigned work and review requests that the notification
   inbox drops once read; the tradeoff is one thread read per item to check the
   signature. Fine for a scheduled agent.
