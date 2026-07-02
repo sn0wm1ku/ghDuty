@@ -5,13 +5,15 @@ description: Automated agent that finds the GitHub work actually waiting on you 
 
 # GitHub duty (automated)
 
-An automated agent. It builds your **actionable queue from durable GitHub state**
-— PRs awaiting your review, things assigned to you, and issues/PRs that mention
-you — because the notification inbox is ephemeral (it drops assigned items and
-anything you've already read, even if the work isn't done). It **handles each
-item itself, in parallel**, and is **idempotent by its own signature**: before
-acting on a thread it checks whether it already replied there with no newer
-activity, and skips if so.
+An automated agent that keeps your GitHub queue moving. Its core job is to
+**automate your pending tasks**: everything assigned to you becomes a ticket
+queued for `/drive`. Alongside that it **responds to every mention** and runs
+**/code-review on every review request**. The queue comes from durable GitHub
+state (assigned + mentioned + review-requested, all open) — GitHub is the record,
+regardless of branch — not the ephemeral notification inbox, which drops assigned
+and already-read items. It **handles each item itself, in parallel**, and is
+**idempotent by its own signature**: it skips a thread it already replied to with
+no newer activity (an assigned task is "done" once its ticket exists).
 
 ## Prerequisite
 
@@ -87,18 +89,32 @@ repo clash; separate `/ticket` writes into an existing clone are safe.
    gh issue view <number> -R <owner/repo> --comments   # Issue
    gh pr view    <number> -R <owner/repo> --comments   # PullRequest
    ```
-2. **Idempotency check** — if the thread already contains a ghDuty signature
-   (`auto-posted by sn0wm1ku/ghDuty`) with **no newer comment after it**, it's
-   already handled → return `skipped` (don't post again).
+2. **Idempotency check** —
+   - *mention / review items*: if the thread already has a ghDuty signature
+     (`auto-posted by sn0wm1ku/ghDuty`) with **no newer comment after it**, it's
+     handled → return `skipped`.
+   - *assigned items*: if the repo's clone already has a ticket whose frontmatter
+     `source:` points at this `owner/repo#number` (in `.workaholic/tickets/` todo
+     **or** archived), the ticket exists → return `skipped`. Don't re-file.
 3. **Classify** (table below) and **handle** per Step 4, signed.
 4. **Return** the structured result.
 
-| Signal | Handle it by |
+Action is driven primarily by **which query surfaced the item** (an item can be
+in more than one; do all that apply):
+
+| Source / signal | Handle it by |
 |---|---|
-| `review-requested`, or a comment asking for review | Run `/code-review` on that PR, post the findings as a reply. |
-| A change / feature / bug-fix request | Run `/ticket <concise description>`, then reply noting the ticket. |
-| A direct question | Reply with the answer. |
-| Nothing actionable (FYI, ack, resolved) | Skip — no reply. |
+| **assigned** (`assignee:@me`) — a task waiting on you | Run `/ticket <concise description>` in the repo's clone so it's queued for `/drive`. This is the tool's core job: automate your pending tasks. Applies whether it's self-assigned or assigned by someone else. |
+| **review-requested**, or a comment asking for review | Run `/code-review` on that PR, post the findings as a reply. |
+| **mentioned**, and the mention asks something | Reply to it — answer a question, or `/ticket` + reply if it's a change request. Respond to every mention **unless the mentioning comment itself is older than 2 years** (see below). |
+| Genuinely nothing to do (pure FYI, an ack, already resolved) | Skip. Do NOT skip an assigned task just because it's "your own" — self-assigned still needs doing. |
+
+**Stale-mention cutoff (mention line only):** judge by the age of the *mentioning
+comment*, not the issue/PR. A thread can have recent activity while the comment
+that `@`-mentions you is two years old — a stale @ isn't worth answering. If the
+mention comment's `created_at` is older than 2 years, skip it. This applies
+**only** to the mention path; assigned tasks and review requests are handled no
+matter how old (an assigned task still needs doing; a review is still requested).
 
 ## Step 4 — how each subagent handles its item
 

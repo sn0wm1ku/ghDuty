@@ -1,14 +1,16 @@
 # ghDuty
 
-**GitHub duty** — a Claude Code plugin that runs as an automated agent: it builds
-the queue of GitHub work **actually waiting on you** across all repos — PRs
-awaiting your review, issues/PRs assigned to you, and issues/PRs that mention you
-— and **handles each on its own, in parallel**, no per-item confirmation:
+**GitHub duty** — a Claude Code plugin that runs as an automated agent whose core
+job is to **automate your pending tasks**. It builds a queue from durable GitHub
+state across all repos and, in parallel:
 
-- **A question** → replies with the answer.
-- **A change request** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, so it lands in that repo's `.workaholic/tickets/todo/` queue and is wired to `/drive`.
-- **A review request** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
+- **Assigned to you** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, queuing it for `/drive`. Self-assigned counts too — it still needs doing.
+- **Mentions you** → replies to every one (answers a question, or tickets + replies for a change request), unless the mentioning *comment* is older than 2 years — a stale @ isn't worth answering (judged by the comment's date, not the issue's).
+- **Review requested** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
 - **Tickets created this run** → optionally pings you on Slack.
+
+GitHub is the record — every open assigned/mentioned/review item counts,
+regardless of branch.
 
 Discovery uses **durable state queries** (`review-requested`, `assignee`,
 `mentions` — all open), not the notification inbox, which is ephemeral and drops
@@ -63,12 +65,14 @@ or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).
 
-Each run builds your queue (review-requested + assigned + mentioned, open) and
-**handles the items in parallel — one subagent per item** — replying, ticketing,
-or reviewing per what each is. On an interactive run the queue can be offered as
-an `AskUserQuestion` checkbox list to pick which to handle; a scheduled run
-handles them all. It skips threads it has already signed (idempotency) and acts
-only on repos you own or collaborate on.
+Each run builds your queue (assigned + mentioned + review-requested, open) and
+**handles the items in parallel — one subagent per item**: assigned → ticket for
+`/drive`, mention → reply, review → `/code-review`. On an interactive run the
+queue can be offered as an `AskUserQuestion` checkbox list to pick which to
+handle; a scheduled run handles them all. It's idempotent — a mention/review with
+a ghDuty reply already there is skipped, and an assigned task whose ticket already
+exists in the clone isn't re-filed — and it acts only on repos you own or
+collaborate on.
 
 Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
 · co-authored by Claude (<model>)` — crediting the plugin and the Claude model
