@@ -72,16 +72,21 @@ it. Classify what it wants:
 
 Act without asking. Post replies and open tickets as the classification dictates.
 
-**Every comment the plugin posts must end with this signature**, so it's clearly
-plugin-generated and easy to find and delete later (issue/PR comments are freely
-editable and deletable by the author):
+**Every comment the plugin posts must end with this signature**, crediting both
+the plugin and the Claude model that wrote the reply. It makes plugin comments
+clearly identifiable and easy to find and delete later (issue/PR comments are
+freely editable and deletable by the author). Fill in `<model>` with the model
+id you are actually running as (e.g. `claude-opus-4-8`, `claude-sonnet-5`):
 
 ```
-\n\n---\n<sub>🤖 auto-posted by [ghDuty](https://github.com/sn0wm1ku/ghDuty)</sub>
+\n\n---\n<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (<model>)</sub>
 ```
+
+Build the signature with your own model id substituted in, then append it to
+every reply body:
 
 ```bash
-SIG=$'\n\n---\n<sub>🤖 auto-posted by [ghDuty](https://github.com/sn0wm1ku/ghDuty)</sub>'
+SIG=$'\n\n---\n<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-4-8)</sub>'
 gh issue comment <number> -R <owner/repo> --body "<reply>$SIG"
 gh pr comment    <number> -R <owner/repo> --body "<reply>$SIG"
 ```

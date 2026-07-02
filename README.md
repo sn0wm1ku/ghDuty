@@ -65,9 +65,10 @@ mention asks. The **first run only sets a baseline** and handles nothing, so it
 never floods on your historical backlog. It acts only on repos you own or
 collaborate on.
 
-Every comment it posts ends with an `🤖 auto-posted by ghDuty` signature linking
-back here, so plugin replies are easy to spot and delete — GitHub issue/PR
-comments are freely editable and deletable by their author.
+Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
+· co-authored by Claude (<model>)` — crediting the plugin and the Claude model
+that wrote it, so plugin replies are easy to spot and delete (GitHub issue/PR
+comments are freely editable and deletable by their author).
 
 ## Slack setup (optional)
 
