@@ -1,7 +1,7 @@
 {
   "name": "ghduty",
-  "version": "0.1.5",
-  "description": "GitHub mention duty — automated agent that checks issues/PRs that @-mention you across all repos and handles each action request itself: reply directly, /ticket on change requests, /code-review on review requests, optional Slack notify on pending tickets. First run works the whole open backlog; later runs handle new activity since the last run. Writes its timestamp only after processing, so it never marks mentions done without doing them. Built to run on a schedule.",
+  "version": "0.1.6",
+  "description": "GitHub notification duty — automated agent that works your GitHub notification inbox (mentions, review requests, assignments, replies on threads you're in) across all repos and handles each itself: reply directly, /ticket on change requests (filed in the repo's clone under a configurable working folder), /code-review on review requests, optional Slack notify on tickets created. Idempotent by notification read-state (handles unread, marks read when done). Built to run on a schedule.",
   "author": {
     "name": "sn0wm1ku",
     "url": "https://github.com/sn0wm1ku"

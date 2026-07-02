@@ -1,26 +1,27 @@
 # ghDuty
 
-**GitHub mention duty** — a Claude Code plugin that runs as an automated agent:
-it checks every issue and PR that `@`-mentions you across all your repos and
-**handles each action request on its own**, no per-item confirmation:
+**GitHub notification duty** — a Claude Code plugin that runs as an automated
+agent: it works your **GitHub notification inbox** (the comment/event-level
+things actually directed at you — mentions, review requests, assignments,
+replies on threads you're in) across all your repos and **handles each on its
+own**, no per-item confirmation:
 
 - **A question** → replies with the answer.
-- **A change request** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) so it lands in your `.workaholic/tickets/todo/` queue.
+- **A change request** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, so it lands in that repo's `.workaholic/tickets/todo/` queue and is wired to `/drive`.
 - **A review request** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
-- **Pending tickets left over** → optionally pings you on Slack.
+- **Tickets created this run** → optionally pings you on Slack.
 
-The **first run lists your open-mention backlog and asks which to handle** (it
-can be large and stale, so it's your call — not an auto-blast). After that, runs
-handle only threads with **new activity since the last run** (a timestamp in the
-plugin data dir bounds the work set), fully automatically. The timestamp is
-written **only after** a run has handled its work — never before — so the agent
-can't mark mentions done without doing them. Designed to run on a schedule once
-the first run has set the baseline.
+It reads **unread** notifications, handles each, and **marks it read** when done
+— read-state is the idempotency, so nothing is handled twice and a thread only
+comes back when it gets new activity. No timestamps, no issue-level `mentions:`
+search (which misses review-requests, assignments, and threads you commented on).
+Designed to run on a schedule.
 
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) **v2.1.110+** (needed for plugin dependencies)
-- [`gh` CLI](https://cli.github.com/) installed and authenticated (`gh auth login`)
+- [`gh` CLI](https://cli.github.com/) installed and authenticated (`gh auth login`). The token needs notification access — the `repo` scope covers it (verify with `gh api /notifications`).
+- A **working folder** where repos live / get cloned (see below).
 - Two other plugins, **auto-installed as dependencies** (see below):
   - `workaholic` — provides `/ticket`, `/drive`, etc.
   - `code-review` — provides `/code-review`
@@ -58,22 +59,45 @@ Run it on demand:
 /gh-mentions
 ```
 
-or on a schedule so mentions get handled unattended (Claude Code
+or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).
 
-On the **first run** it presents your open backlog as a checkbox list
-(`AskUserQuestion`) and asks which mentions to handle — excluding anything with no
-activity in the last 2 years, capped at the latest 200 (asked in rounds of up to
-16, the tool's per-prompt limit). After that, each run **handles each action
-request automatically** — replying, ticketing, or reviewing per what the mention
-asks, for threads with new activity since the last run — and acts only on repos
-you own or collaborate on.
+Each run reads your unread notifications and **handles them in parallel — one
+subagent per notification** — replying, ticketing, or reviewing per what each is,
+then marking it read. On an interactive run with several items you can be offered
+an `AskUserQuestion` checkbox list to pick which to handle (unticked ones stay
+unread and resurface next time); a scheduled run handles them all. It acts only
+on repos you own or collaborate on.
 
 Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
 · co-authored by Claude (<model>)` — crediting the plugin and the Claude model
 that wrote it, so plugin replies are easy to spot and delete (GitHub issue/PR
 comments are freely editable and deletable by their author).
+
+## Working folder
+
+Change requests become tickets, and `/ticket` writes into `.workaholic/tickets/todo/`
+**relative to the current directory**. Since ghDuty runs from an arbitrary folder
+across many repos, it instead uses a **working folder** where repos live as
+`<owner>/<repo>`. If the target repo isn't cloned there, ghDuty clones it on
+demand, then files the ticket inside it (wired to that repo's `/drive`).
+
+Set the working folder via `GHDUTY_WORK_DIR` (default `~/Projects`) in your
+[settings.json](https://code.claude.com/docs/en/settings) `env` block:
+
+```json
+{ "env": { "GHDUTY_WORK_DIR": "/Users/you/Projects" } }
+```
+
+Repos accumulate as clones under this folder; make sure there's disk for the
+repos you get mentioned in.
+
+**Every run**, ghDuty checks the working folder is added to the current session.
+If it isn't, it asks your permission before working on it and adds it with
+`/add-dir` — it never clones into or writes to a folder you haven't granted the
+session. On the very first run it also prompts for the path if `GHDUTY_WORK_DIR`
+isn't set.
 
 ## Slack setup (optional)
 
@@ -82,34 +106,32 @@ Slack notification is **opt-in** and off by default. It uses a Slack
 you — a message sent as yourself into your own DM would not trigger a
 notification.
 
-To get a ping when a run leaves pending tickets in `.workaholic/tickets/todo/`:
+To get a ping when a run **creates a ticket**:
 
 1. Create an Incoming Webhook: <https://api.slack.com/messaging/webhooks> —
    make a Slack app, enable **Incoming Webhooks**, add one to the channel (or a
    channel you'll get notified in), and copy the webhook URL
    (`https://hooks.slack.com/services/T…/B…/…`).
-2. Set it via the `GHDUTY_SLACK_WEBHOOK` env var in your
-   [settings.json](https://code.claude.com/docs/en/settings) `env` block:
+2. Set it via the `GHDUTY_SLACK_WEBHOOK` env var. **It's a secret** — put it in
+   your **local** settings (`settings.local.json`), never a committed dotfiles
+   `settings.json`:
 
    ```json
    { "env": { "GHDUTY_SLACK_WEBHOOK": "https://hooks.slack.com/services/T.../B.../..." } }
    ```
 
-> **The webhook URL is a secret** — anyone with it can post to your Slack. Keep
-> it in local settings; do not commit it to a dotfiles repo.
-
 If `GHDUTY_SLACK_WEBHOOK` is unset, the Slack step is skipped silently — the
 rest of the workflow works without any Slack config.
 
-## How last-run tracking works
+## How it avoids double-handling
 
-The skill stores an ISO-8601 timestamp at `${CLAUDE_PLUGIN_DATA}/last-run`
-(falling back to `~/.claude/ghduty/last-run`). The first run has no timestamp, so
-it lists the open backlog and asks which mentions to handle; later runs filter to
-`--updated ">last-run"` and run automatically. The timestamp is written **only
-after** the work set is handled — never before — so a run can never mark mentions
-done without processing them. Delete the file to be prompted for the backlog
-again on the next run.
+There is no timestamp. Discovery is your GitHub notification inbox, and
+**read-state is the idempotency**: ghDuty only processes **unread** notifications
+and marks each **read** after it has handled or triaged it — never before, so it
+can't mark something done without processing it. A handled thread stays read
+until it gets new activity, which flips it back to unread — exactly when it
+should be handled again. Items you leave unticked on an interactive run stay
+unread.
 
 ## License
 
