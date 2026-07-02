@@ -4,10 +4,12 @@
 job is to **automate your pending tasks**. It builds a queue from durable GitHub
 state across all repos and, in parallel:
 
-- **Assigned to you** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, queuing it for `/drive`. Self-assigned counts too — it still needs doing.
-- **Mentions you** → replies to every one (answers a question, or tickets + replies for a change request), unless the mentioning *comment* is older than 2 years — a stale @ isn't worth answering (judged by the comment's date, not the issue's).
+- **Assigned issue that already has a linked PR** (the osbr repos auto-open a PR when you're assigned) → leaves a signed acknowledgment comment; the PR is handled by the PR rule.
+- **Assigned issue with no PR** (an idea/discussion) → opens a `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, **pushes a ticket branch**, and Slacks you to `/drive` it.
+- **Assigned PR** → closed: skipped; open with implementation: skipped for now (testing phase).
+- **Mentions you** → replies to every one, unless the mentioning *comment* is >2 years old (judged by the comment's date, not the issue's).
 - **Review requested** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
-- **Tickets created this run** → optionally pings you on Slack.
+- **Tickets created this run** → optionally pings you on Slack (with the pushed branch).
 
 GitHub is the record — every open assigned/mentioned/review item counts,
 regardless of branch.

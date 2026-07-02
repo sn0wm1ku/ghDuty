@@ -5,15 +5,21 @@ description: Automated agent that finds the GitHub work actually waiting on you 
 
 # GitHub duty (automated)
 
-An automated agent that keeps your GitHub queue moving. Its core job is to
-**automate your pending tasks**: everything assigned to you becomes a ticket
-queued for `/drive`. Alongside that it **responds to every mention** and runs
-**/code-review on every review request**. The queue comes from durable GitHub
-state (assigned + mentioned + review-requested, all open) — GitHub is the record,
-regardless of branch — not the ephemeral notification inbox, which drops assigned
-and already-read items. It **handles each item itself, in parallel**, and is
-**idempotent by its own signature**: it skips a thread it already replied to with
-no newer activity (an assigned task is "done" once its ticket exists).
+An automated agent that keeps your GitHub queue moving, its core job being to
+**automate your pending tasks**. It builds the queue from durable GitHub state
+(assigned + mentioned + review-requested, all open, across all repos — GitHub is
+the record) and handles each item in parallel by subtype:
+
+- **assigned issue that already has a linked PR** (osbr auto-opens a PR on assign)
+  → leave a signed acknowledgment comment; the PR is handled by the PR rule.
+- **assigned issue with no PR** (an idea/discussion) → open a ticket in the repo's
+  clone, push a ticket branch, and Slack you to `/drive` it.
+- **assigned PR** → closed: skip; open (in progress): skip for now (testing phase).
+- **mention** → reply (skip if the mentioning comment is >2 years old).
+- **review request** → `/code-review`, post findings.
+
+Idempotent by its own signature (a thread with a ghDuty reply and nothing newer
+is done) and, for idea-issue tickets, by the ticket already existing in the clone.
 
 ## Prerequisite
 
@@ -90,50 +96,66 @@ repo clash; separate `/ticket` writes into an existing clone are safe.
    gh pr view    <number> -R <owner/repo> --comments   # PullRequest
    ```
 2. **Idempotency check** —
-   - *mention / review items*: if the thread already has a ghDuty signature
-     (`auto-posted by sn0wm1ku/ghDuty`) with **no newer comment after it**, it's
-     handled → return `skipped`.
-   - *assigned items*: if the repo's clone already has a ticket whose frontmatter
-     `source:` points at this `owner/repo#number` (in `.workaholic/tickets/` todo
-     **or** archived), the ticket exists → return `skipped`. Don't re-file.
+   - *mention / review / assigned-issue-with-PR (ack)*: if the thread already has
+     a ghDuty signature (`auto-posted by sn0wm1ku/ghDuty`) with **no newer comment
+     after it**, it's handled → return `skipped` (don't re-comment / re-ack).
+   - *assigned idea-issue (ticket)*: if the repo's clone already has a ticket whose
+     frontmatter `source:` points at this `owner/repo#number` (in
+     `.workaholic/tickets/` todo **or** archived), it exists → return `skipped`.
 3. **Classify** (table below) and **handle** per Step 4, signed.
 4. **Return** the structured result.
 
-Action is driven primarily by **which query surfaced the item** (an item can be
-in more than one; do all that apply):
+Action is driven by **which query surfaced the item** and, for assigned items,
+its subtype. An item can be in more than one query; do all that apply.
 
 | Source / signal | Handle it by |
 |---|---|
-| **assigned** (`assignee:@me`) — a task waiting on you | Run `/ticket <concise description>` in the repo's clone so it's queued for `/drive`. This is the tool's core job: automate your pending tasks. Applies whether it's self-assigned or assigned by someone else. |
+| **assigned ISSUE with a linked PR** (the osbr repos auto-open a PR when you're assigned; you're already assigned on that PR) | Leave an **acknowledgment comment** on the issue: `Acknowledged <UTC date time>.` (signed). The linked PR is handled by the assigned-PR rule below. |
+| **assigned ISSUE with no PR** (usually an idea/discussion — still needs a response) | Open a **ticket** in the repo's clone, **create + push a new branch** for the ticket, then **Slack** to drive it (Step 5). |
+| **assigned PR** | **Closed → skip.** **Open (implementation in progress) → skip for now** (we're in a testing phase; future runs will handle these). |
 | **review-requested**, or a comment asking for review | Run `/code-review` on that PR, post the findings as a reply. |
-| **mentioned**, and the mention asks something | Reply to it — answer a question, or `/ticket` + reply if it's a change request. Respond to every mention **unless the mentioning comment itself is older than 2 years** (see below). |
-| Genuinely nothing to do (pure FYI, an ack, already resolved) | Skip. Do NOT skip an assigned task just because it's "your own" — self-assigned still needs doing. |
+| **mentioned**, and the mention asks something | Reply — answer a question, or ticket + reply if it's a change request. **Skip if the mentioning comment itself is >2 years old** (judge by the comment's `created_at`, not the issue's; a stale @ isn't worth answering). |
+| Genuinely nothing to do (pure FYI, an ack, already resolved) | Skip. |
 
-**Stale-mention cutoff (mention line only):** judge by the age of the *mentioning
-comment*, not the issue/PR. A thread can have recent activity while the comment
-that `@`-mentions you is two years old — a stale @ isn't worth answering. If the
-mention comment's `created_at` is older than 2 years, skip it. This applies
-**only** to the mention path; assigned tasks and review requests are handled no
-matter how old (an assigned task still needs doing; a review is still requested).
+Age note: the 2-year cutoff applies **only** to the mention line. Assigned items
+and review requests are handled regardless of age (an assigned task still needs
+doing; a review is still requested).
+
+**Detecting a linked PR** for an assigned issue: check the issue's timeline /
+`closedByPullRequestsReferences`, or search `gh pr list -R <repo> --search "<issue#>"`.
+If a PR references/closes the issue and you're assigned on it, treat the issue as
+"has linked PR" (acknowledge only).
 
 ## Step 4 — how each subagent handles its item
 
 Act without asking. Post replies and open tickets per the classification.
 
-**Change requests → file the ticket in the target repo's clone under the working
-folder, not cwd.** `/ticket` (workaholic) writes to `.workaholic/tickets/todo/`
-relative to cwd, but ghDuty runs from an arbitrary folder across many repos. Use
-the **working folder** (`GHDUTY_WORK_DIR`, default `~/Projects`), clone the repo
-there on demand, then run `/ticket` inside it so it wires to that repo's `/drive`:
+**Tickets go in the target repo's clone under the working folder, not cwd, and
+get their own pushed branch.** `/ticket` (workaholic) writes to
+`.workaholic/tickets/todo/` relative to cwd, but ghDuty runs from an arbitrary
+folder. Use the **working folder** (`GHDUTY_WORK_DIR`, default `~/Projects`),
+clone the repo on demand, make a ticket branch, run `/ticket` inside it, then push:
 
 ```bash
 WORK="${GHDUTY_WORK_DIR:-$HOME/Projects}"
 CLONE="$WORK/<owner>/<repo>"
 [ -d "$CLONE/.git" ] || gh repo clone "<owner>/<repo>" "$CLONE" || echo "clone failed"
-cd "$CLONE"          # then run /ticket <desc>
+cd "$CLONE"
+git switch -c "ghduty/ticket-<issue#>-<slug>" origin/HEAD   # new branch off default
+# run /ticket <desc>  → writes .workaholic/tickets/todo/<...>.md (source: owner/repo#n)
+git add .workaholic/tickets/ && git commit -m "ghduty: ticket for #<issue#>"
+git push -u origin "ghduty/ticket-<issue#>-<slug>"
 ```
 
-If the clone fails, note it in the reply + summary instead of losing it.
+If the clone or push fails, note it in the summary instead of losing the item.
+Record `{repo, issue, ticket_path, branch}` for the Slack step.
+
+**Acknowledgment comments** (assigned issue that already has a linked PR) are just
+a signed comment on the issue — no ticket, no branch:
+
+```bash
+gh issue comment <number> -R <owner/repo> --body "Acknowledged $(date -u +'%Y-%m-%d %H:%M UTC').$SIG"
+```
 
 **Every comment the plugin posts must end with this signature** — it credits the
 plugin and the Claude model, makes comments easy to find/delete, and is what the
@@ -151,8 +173,10 @@ note it in the summary instead of posting.
 ## Step 5 — Slack notify about tickets created this run (optional)
 
 Opt-in, fires only when `GHDUTY_SLACK_WEBHOOK` is set (see README "Slack setup")
-and this run created ≥1 ticket. Notify from the subagents' `ticketed` results.
-The webhook posts as its own app, so you actually get notified:
+and this run created ≥1 ticket. Notify from the subagents' `ticketed` results —
+list each ticket with its repo, source issue, and the **branch that was pushed**,
+so you can `/drive` it. The webhook posts as its own app, so you actually get
+notified:
 
 ```bash
 if [ -n "$GHDUTY_SLACK_WEBHOOK" ]; then   # and ≥1 ticket created

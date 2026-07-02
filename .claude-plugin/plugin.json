@@ -1,7 +1,7 @@
 {
   "name": "ghduty",
-  "version": "0.1.8",
-  "description": "GitHub duty — automated agent whose core job is to automate your pending tasks: everything assigned to you (self-assigned included) becomes a /ticket queued for /drive in the target repo's clone. Alongside that it replies to every mention and runs /code-review on every review request. Queue comes from durable GitHub state (assigned + mentioned + review-requested, all open) across all repos, handled in parallel, optional Slack notify on tickets created. Idempotent (reply signature for mentions/reviews, existing ticket for assigned). Built to run on a schedule.",
+  "version": "0.1.9",
+  "description": "GitHub duty — automated agent whose core job is to automate your pending tasks. From durable GitHub state (assigned + mentioned + review-requested, open, all repos) it handles each item by subtype in parallel: assigned issue with a linked PR → signed acknowledgment comment; assigned idea-issue with no PR → ticket + pushed branch in the repo's clone + Slack to /drive; assigned PR → skip (closed, or open-in-progress during testing); mention → reply (skip if the mentioning comment is >2yr old); review request → /code-review. Idempotent by reply signature / existing ticket. Built to run on a schedule.",
   "author": {
     "name": "sn0wm1ku",
     "url": "https://github.com/sn0wm1ku"
