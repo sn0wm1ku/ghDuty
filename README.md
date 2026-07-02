@@ -67,13 +67,13 @@ or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).
 
-Each run builds your queue (assigned + mentioned + review-requested, open) and
+Every run builds your queue (assigned + mentioned + review-requested, open) and
 **handles the items in parallel — one subagent per item**: assigned → ticket for
-`/drive`, mention → reply, review → `/code-review`. On an interactive run the
-queue can be offered as an `AskUserQuestion` checkbox list to pick which to
-handle; a scheduled run handles them all. It's idempotent — a mention/review with
-a ghDuty reply already there is skipped, and an assigned task whose ticket already
-exists in the clone isn't re-filed — and it acts only on repos you own or
+`/drive`, mention → reply, review → `/code-review`. No first-run gate and no
+checkbox — every run handles every item that isn't already signed or filtered
+out. It's idempotent by the **signed comment in each thread**: any item ghDuty
+already acted on carries a signature (ack, reply, review, or ticket-notice), so
+it's skipped until someone replies after it. It acts only on repos you own or
 collaborate on.
 
 Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
@@ -102,8 +102,9 @@ repos you get mentioned in.
 **Every run**, ghDuty checks the working folder is added to the current session.
 If it isn't, it asks your permission before working on it and adds it with
 `/add-dir` — it never clones into or writes to a folder you haven't granted the
-session. On the very first run it also prompts for the path if `GHDUTY_WORK_DIR`
-isn't set.
+session. It also prompts for the path if `GHDUTY_WORK_DIR` isn't set. This is the
+only bootstrap — pure configuration (working folder + optional Slack webhook),
+no run-state.
 
 ## Slack setup (optional)
 

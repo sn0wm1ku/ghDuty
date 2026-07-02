@@ -29,7 +29,15 @@ is "done" — one uniform check for every item type, no local state, no timestam
 gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 ```
 
-## Step 0 — bootstrap (checked every run; acts only when something's missing)
+## Step 0 — bootstrap (pure configuration, no run-state)
+
+Bootstrap only checks **configuration** — there is no per-run state to read or
+write (idempotency lives in the GitHub thread signatures, Step 3). Two config
+items:
+
+- **`GHDUTY_WORK_DIR`** — the working folder where repos are cloned (below).
+- **`GHDUTY_SLACK_WEBHOOK`** — optional Slack callback for ticket notifications
+  (Step 5); unset = Slack silently skipped.
 
 **(a) Working folder — checked EVERY run.** Where repos live / get cloned so
 `/ticket` lands in the right repo (Step 4). Two gates each time:
@@ -45,14 +53,9 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 WORK="${GHDUTY_WORK_DIR:-$HOME/Projects}"; echo "working folder: $WORK"
 ```
 
-**(b) First-run marker** — gates the backlog prompt (Step 2). Written only at the
-end (Step 6):
-
-```bash
-STATE_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}"; mkdir -p "$STATE_DIR"
-MARK="$STATE_DIR/initialized"; FIRST_RUN=1; [ -f "$MARK" ] && FIRST_RUN=0
-echo "first run: $FIRST_RUN"
-```
+There is **no first-run marker and no local state** — the signature in each
+thread (Step 3) is the only record of what's been done, so every run behaves the
+same: handle every unsigned item in the queue.
 
 ## Step 1 — build the work set (durable queries)
 
@@ -74,12 +77,12 @@ gh search issues --mentions=@me --include-prs --state open --limit 100 \
 Dedupe by `repo#number`; tag each with why it's here (review-requested /
 assigned / mentioned). This is the full queue of GitHub work waiting on you.
 
-## Step 2 — pick what to handle
+## Step 2 — (nothing to pick)
 
-- **First run (`FIRST_RUN=1`) and interactive** → the queue may be large; present
-  it as an `AskUserQuestion` multiSelect (checkbox) list and handle only ticked
-  items (caps at 4 questions × 4 options = 16 per call; ask in rounds if more).
-- **Routine run, or non-interactive / scheduled** → handle every item, no asking.
+Every run handles every item in the queue that isn't already signed or filtered
+out (stale >2yr mention, closed PR, etc.). No first-run gate, no checkbox — the
+signature is what stops re-handling, and the durable queries + filters are what
+scope the work. Built to run unattended.
 
 ## Step 3 — fan out: one subagent per item (parallel)
 
@@ -241,17 +244,11 @@ fi
 
 If unset or no ticket was created, skip silently.
 
-## Step 6 — write the first-run marker
+## Step 6 — report
 
-Once all subagents have returned, write the marker so later runs skip the backlog
-prompt:
-
-```bash
-date -u +%Y-%m-%dT%H:%M:%SZ > "$MARK"
-```
-
-Report a short summary: replied / ticketed / reviewed / skipped-already-answered /
-skipped-not-mine / left-unticked / notified.
+Once all subagents have returned, report a short summary: replied / ticketed /
+reviewed / skipped-already-answered / skipped-not-mine / notified. No state to
+write — the signatures posted this run are the only record.
 
 ## Notes
 
