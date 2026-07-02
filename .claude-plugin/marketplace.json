@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "ghduty",
+  "description": "GitHub mention duty — triage your @mentions and dispatch to tickets, reviews, and Slack.",
+  "owner": {
+    "name": "sn0wm1ku",
+    "url": "https://github.com/sn0wm1ku"
+  },
+  "allowCrossMarketplaceDependenciesOn": ["workaholic", "claude-plugins-official"],
+  "plugins": [
+    {
+      "name": "ghduty",
+      "description": "Triage GitHub issues/PRs that @-mention you across all repos and handle them one by one. Requires the workaholic and code-review plugins.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
