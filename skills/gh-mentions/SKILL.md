@@ -31,13 +31,17 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 
 ## Step 0 — bootstrap (pure configuration, no run-state)
 
-Bootstrap only checks **configuration** — there is no per-run state to read or
-write (idempotency lives in the GitHub thread signatures, Step 3). Two config
-items:
+Bootstrap checks **configuration**. Correctness never depends on local state —
+"acted" is recorded remotely by the thread signature (Step 3). There is one
+**local optimization cache** (the skip-ledger, below): losing it only costs a
+re-read, never a wrong action.
 
 - **`GHDUTY_WORK_DIR`** — the working folder where repos are cloned (below).
 - **`GHDUTY_SLACK_WEBHOOK`** — optional Slack callback for ticket notifications
   (Step 5); unset = Slack silently skipped.
+- **skip-ledger** — `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger.jsonl`,
+  one line per item deliberately judged "no action needed", so later runs don't
+  re-read it. Safe to delete (just forces a re-read). Details in Step 3.
 
 **(a) Working folder — checked EVERY run.** Where repos live / get cloned so
 `/ticket` lands in the right repo (Step 4). Two gates each time:
@@ -53,9 +57,9 @@ items:
 WORK="${GHDUTY_WORK_DIR:-$HOME/Projects}"; echo "working folder: $WORK"
 ```
 
-There is **no first-run marker and no local state** — the signature in each
-thread (Step 3) is the only record of what's been done, so every run behaves the
-same: handle every unsigned item in the queue.
+There is **no first-run marker** — every run behaves the same. The only local
+file is the skip-ledger (an optimization cache, above); correctness lives in the
+remote thread signatures.
 
 ## Step 1 — build the work set (durable queries)
 
@@ -98,6 +102,14 @@ runs `/ticket` / `/code-review`) and does all remote writes through the **GitHub
 MCP** (branch, file commit, comment) — never `git push` / `gh` write commands,
 which permission policy often blocks.
 
+**Ledger fast-skip (orchestrator, before fan-out).** For each queue item, check
+the skip-ledger first: if `owner/repo#n` is recorded with the **same `updatedAt`**
+the query returned (i.e. no new activity since you last judged it not worth
+acting on), drop it from the work set — no subagent, no thread read. If the item
+isn't in the ledger, or its `updatedAt` changed (new activity), it goes to a
+subagent. This is what stops "considered, no action" items from being re-read
+every run; the signature (remote) still covers items you *did* act on.
+
 ### What each per-item subagent does
 
 1. **Read** the thread and its latest activity:
@@ -118,7 +130,12 @@ which permission policy often blocks.
    is the durable, remote marker instead. A thread becomes actionable again only
    when someone comments after ghDuty's signed comment (i.e. real follow-up).
 3. **Classify** (table below) and **handle** per Step 4, signed.
-4. **Return** the structured result.
+4. **Return** the structured result. If the verdict is **no action needed**
+   (nothing actionable — a bare FYI, an ack, a resolved thread), return
+   `skipped` with the thread's `updatedAt`; the orchestrator appends it to the
+   skip-ledger (`{repo, number, updatedAt}`) so the ledger fast-skip suppresses
+   it next run until new activity bumps `updatedAt`. Items that were *acted on*
+   are NOT ledgered — their signed comment is the marker.
 
 Action is driven by **which query surfaced the item** and, for assigned items,
 its subtype. An item can be in more than one query; do all that apply.
@@ -252,11 +269,13 @@ write — the signatures posted this run are the only record.
 
 ## Notes
 
-- **Idempotency is the signed comment in the thread** — not a timestamp, not
-  notification read-state, not a local ticket file. Every action (including
-  filing a ticket) leaves a signed comment, so the same check covers all types.
-  Don't look for the ticket locally: it lives on a remote `ghduty/ticket-*` branch
-  that's never checked out into the clone.
+- **Two records, by outcome.** *Acted* (ack/reply/review/ticket) → a signed
+  comment in the thread (remote, durable, the correctness record). *Considered
+  but no action* → an entry in the local skip-ledger keyed by `updatedAt` (an
+  optimization so it isn't re-read every run; safe to lose). New activity after
+  either — a comment after our signature, or a bumped `updatedAt` past the ledger
+  entry — makes the item actionable again. Don't look for a ticket file locally:
+  it lives on a remote `ghduty/ticket-*` branch, never checked out into the clone.
 - Durable queries catch assigned work and review requests that the notification
   inbox drops once read; the tradeoff is one thread read per item to check the
   signature. Fine for a scheduled agent.

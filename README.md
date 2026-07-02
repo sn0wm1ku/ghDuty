@@ -132,12 +132,20 @@ rest of the workflow works without any Slack config.
 
 ## How it avoids double-handling
 
-There is no timestamp and it doesn't rely on notification read-state (which would
-drop assigned/read-but-undone work). Every comment ghDuty posts carries its
-signature, and **the signature is the idempotency**: before acting on a thread a
-subagent checks whether a ghDuty reply is already there with no newer comment
-after it, and skips if so. A thread becomes actionable again only when someone
-replies after ghDuty's last comment — exactly when it should be re-handled.
+No timestamp, no notification read-state (which would drop assigned/read-but-undone
+work). Two records, by outcome:
+
+- **Acted** (ack / reply / review / ticket) → a **signed comment** in the thread.
+  Remote, durable — this is the correctness record. Before acting, a subagent
+  checks whether a ghDuty comment is already there with nothing newer, and skips.
+- **Considered but no action needed** (a bare FYI, an ack, a resolved thread) →
+  an entry in a local **skip-ledger** (`${CLAUDE_PLUGIN_DATA}/skip-ledger.jsonl`)
+  keyed by the thread's `updatedAt`, so it isn't re-read every run. It's a pure
+  optimization cache — delete it and you just re-read those threads once.
+
+New activity after either marker (a reply after our comment, or a bumped
+`updatedAt` past the ledger entry) makes the item actionable again — exactly when
+it should be re-handled.
 
 ## License
 
