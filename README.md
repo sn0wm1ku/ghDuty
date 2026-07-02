@@ -9,10 +9,13 @@ it checks every issue and PR that `@`-mentions you across all your repos and
 - **A review request** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
 - **Pending tickets left over** → optionally pings you on Slack.
 
-It handles only mentions with **new activity since the last run**, so nothing is
-touched twice. The **first run just sets a baseline** — it does not drain your
-historical backlog; the agent watches from install onward. The last-run
-timestamp is kept in the plugin's data dir. Designed to run on a schedule.
+The **first run lists your open-mention backlog and asks which to handle** (it
+can be large and stale, so it's your call — not an auto-blast). After that, runs
+handle only threads with **new activity since the last run** (a timestamp in the
+plugin data dir bounds the work set), fully automatically. The timestamp is
+written **only after** a run has handled its work — never before — so the agent
+can't mark mentions done without doing them. Designed to run on a schedule once
+the first run has set the baseline.
 
 ## Requirements
 
@@ -59,11 +62,13 @@ or on a schedule so mentions get handled unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).
 
-Each run checks mentions with new activity since the last run and **handles each
-action request automatically** — replying, ticketing, or reviewing per what the
-mention asks. The **first run only sets a baseline** and handles nothing, so it
-never floods on your historical backlog. It acts only on repos you own or
-collaborate on.
+On the **first run** it presents your open backlog as a checkbox list
+(`AskUserQuestion`) and asks which mentions to handle — excluding anything with no
+activity in the last 2 years, capped at the latest 200 (asked in rounds of up to
+16, the tool's per-prompt limit). After that, each run **handles each action
+request automatically** — replying, ticketing, or reviewing per what the mention
+asks, for threads with new activity since the last run — and acts only on repos
+you own or collaborate on.
 
 Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
 · co-authored by Claude (<model>)` — crediting the plugin and the Claude model
@@ -99,10 +104,12 @@ rest of the workflow works without any Slack config.
 ## How last-run tracking works
 
 The skill stores an ISO-8601 timestamp at `${CLAUDE_PLUGIN_DATA}/last-run`
-(falling back to `~/.claude/ghduty/last-run`). Each run filters mentions with
-`gh search issues --updated ">$LAST"` and stamps a fresh timestamp only after
-the queue is worked. Note this filters by *last activity*, not *replied-yet*: a
-thread you deliberately skip won't reappear unless it gets new activity.
+(falling back to `~/.claude/ghduty/last-run`). The first run has no timestamp, so
+it lists the open backlog and asks which mentions to handle; later runs filter to
+`--updated ">last-run"` and run automatically. The timestamp is written **only
+after** the work set is handled — never before — so a run can never mark mentions
+done without processing them. Delete the file to be prompted for the backlog
+again on the next run.
 
 ## License
 

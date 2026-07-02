@@ -1,14 +1,17 @@
 ---
 name: gh-mentions
-description: Automated agent that checks GitHub issues/PRs mentioning you (@me) across all repos and handles each action request on its own — replies to questions, runs /ticket on change requests, runs /code-review on review requests, and Slack-notifies when tickets are left pending. Handles only mentions with new activity since the last run (no re-handling). Use when the user says "check my GitHub mentions", "handle my mentions", or runs this on a schedule.
+description: Automated agent that checks GitHub issues/PRs mentioning you (@me) across all repos and handles each action request on its own — replies to questions, runs /ticket on change requests, runs /code-review on review requests, and Slack-notifies when tickets are left pending. The first run lists your open backlog and asks which to handle; later runs are fully automatic, handling only threads with new activity since the last run. Use when the user says "check my GitHub mentions", "handle my mentions", or runs this on a schedule.
 ---
 
 # GitHub mention duty (automated)
 
-An automated agent, not an interactive checklist. On each run it checks for new
-mentions and **handles each action request itself** — no per-item confirmation.
-It handles only mentions that have new activity since the last run, so nothing is
-touched twice. Meant to run unattended (e.g. on a schedule).
+An automated agent. Later runs handle each action request themselves with no
+per-item confirmation. The **one exception is the first run**: the open backlog
+can be large and stale, so it lists the backlog and asks you which to handle —
+after that, it's fully automatic. A last-run timestamp bounds the work set and is
+written **only after** the work is handled — never before, so the agent can't
+mark mentions done without doing them. Meant to run unattended (e.g. on a
+schedule) once the first run has set the baseline.
 
 ## Prerequisite
 
@@ -27,31 +30,46 @@ STATE="$STATE_DIR/last-run"
 LAST=$(cat "$STATE" 2>/dev/null)
 ```
 
-## Step 1 — first run establishes a baseline, it does NOT drain the backlog
+## Step 1 — build the work set
 
-If `LAST` is empty this is the first run. Do **not** handle the entire
-historical backlog. Stamp now and stop — the agent starts watching from here:
+Do NOT stamp here — only after the work is handled (Step 5), so the agent can
+never mark mentions done without doing them.
 
-```bash
-if [ -z "$LAST" ]; then
-  date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE"
-  echo "baseline set — will handle mentions with new activity from now on"
-  exit 0
-fi
-```
-
-## Step 2 — list mentions with new activity since last run
+**Later runs** (`LAST` set) — fully automatic, no asking. The work set is every
+thread with new activity since `LAST`:
 
 ```bash
-gh search issues --mentions=@me --include-prs --sort updated --limit 50 \
+gh search issues --mentions=@me --include-prs --sort updated --limit 100 \
   --updated ">$LAST" \
   --json repository,number,title,state,url,isPullRequest,updatedAt
 ```
 
-`--include-prs` folds PRs in, `@me` is the logged-in user. This is the work set:
-only threads that changed since the baseline.
+**First run** (`LAST` empty) — the open backlog can be large and stale, so it's
+the user's choice, not an auto-blast. Fetch candidates, **excluding anything with
+last activity older than 2 years**, capped at the latest 200:
 
-## Step 3 — for each, read the thread and classify
+```bash
+CUTOFF=$(date -u -v-2y +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+      || date -u -d '2 years ago' +%Y-%m-%dT%H:%M:%SZ)   # BSD then GNU
+gh search issues --mentions=@me --include-prs --state open --sort updated \
+  --updated ">$CUTOFF" --limit 200 \
+  --json repository,number,title,state,url,isPullRequest,updatedAt
+```
+
+If the result hits 200, tell the user only the latest 200 are being offered
+(older ones were not listed).
+
+Then **ask the user which to handle with `AskUserQuestion`, multiSelect (a
+checkbox list)** — each option is one mention (`repo#123 — title`). Note the tool
+caps a single call at 4 questions × 4 options = **16 checkboxes**; if there are
+more candidates, ask in successive rounds until all have been offered. The
+first-run work set is only the mentions the user ticks.
+
+If the run is non-interactive (e.g. scheduled) so no selection can be made,
+handle none — fall through to Step 5 and stamp the baseline. `--include-prs`
+folds PRs in, `@me` is the logged-in user.
+
+## Step 2 — for each, read the thread and classify
 
 ```bash
 gh issue view <number> -R <owner/repo> --comments   # issue
@@ -68,7 +86,7 @@ it. Classify what it wants:
 | **A direct question** | Reply with the answer. |
 | **Not an action request** (FYI, drive-by mention, resolved) | Skip — no reply. |
 
-## Step 4 — handle it automatically
+## Step 3 — handle it automatically
 
 Act without asking. Post replies and open tickets as the classification dictates.
 
@@ -94,7 +112,7 @@ gh pr comment    <number> -R <owner/repo> --body "<reply>$SIG"
 Act only on repos you own or collaborate on. If a mention is on a repo you don't
 maintain, note it in the run summary instead of posting.
 
-## Step 5 — Slack notify if tickets are pending (optional)
+## Step 4 — Slack notify if tickets are pending (optional)
 
 Opt-in, fires only when `GHDUTY_SLACK_WEBHOOK` is set (a Slack Incoming Webhook
 URL — see README "Slack setup") and there are pending tickets. The webhook posts
@@ -110,7 +128,7 @@ fi
 
 If the var is unset or `todo/` is empty, skip silently.
 
-## Step 6 — record this run's timestamp
+## Step 5 — record this run's timestamp (only now, after handling)
 
 Stamp now so the next run only sees newer activity:
 
