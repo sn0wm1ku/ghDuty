@@ -105,9 +105,11 @@ which permission policy often blocks.
    - *mention / review / assigned-issue-with-PR (ack)*: if the thread already has
      a ghDuty signature (`auto-posted by sn0wm1ku/ghDuty`) with **no newer comment
      after it**, it's handled → return `skipped` (don't re-comment / re-ack).
-   - *assigned idea-issue (ticket)*: if the repo's clone already has a ticket whose
-     frontmatter `source:` points at this `owner/repo#number` (in
-     `.workaholic/tickets/` todo **or** archived), it exists → return `skipped`.
+   - *assigned idea-issue (ticket)*: if a ticket with frontmatter
+     `source: owner/repo#number` already exists anywhere under the repo's
+     `.workaholic/tickets/` (todo/<user>/, icebox/, abandoned/, archive/) —
+     e.g. `grep -rl "source: owner/repo#n" .workaholic/tickets/` — it's filed →
+     return `skipped`.
 3. **Classify** (table below) and **handle** per Step 4, signed.
 4. **Return** the structured result.
 
@@ -153,24 +155,37 @@ clone the repo on demand, make a ticket branch, run `/ticket` inside it, then pu
    CLONE="$WORK/<owner>/<repo>"
    [ -d "$CLONE/.git" ] || gh repo clone "<owner>/<repo>" "$CLONE" || echo "clone failed"
    cd "$CLONE"
-   BR="ghduty/ticket-<issue#>-<slug>"
-   WT="$CLONE/.git/ghduty-wt/$BR"
    git fetch -q origin
-   git worktree add -b "$BR" "$WT" origin/HEAD
+   WT="$CLONE/.git/ghduty-wt/t<issue#>"
+   git worktree add --detach "$WT" origin/HEAD   # --detach: no local branch (see note)
    cd "$WT"
-   # invoke the workaholic /ticket skill here with a concise description of the issue;
-   # it writes .workaholic/tickets/todo/<...>.md — then set `source: owner/repo#n`
-   # in its frontmatter so idempotency (Step 3) can find it.
+   # invoke the workaholic /ticket skill here with a concise description of the issue.
    ```
+
+   **Do NOT create a named local branch for the worktree** (`-b ghduty/...`):
+   workaholic ships a `guard-git-branch.sh` hook that only allows `work-*` branch
+   names, so a custom branch name is rejected. Use `--detach` — the worktree is
+   just a scratch dir for `/ticket`; the *remote* branch is made separately via MCP
+   (which doesn't hit the local hook).
+
+   **Let `/ticket` own the ticket's path and frontmatter — don't override them.**
+   workaholic's `validate-ticket.sh` enforces: path `todo/<user>/<file>.md` (the
+   per-user subdir is mandatory; a flat `todo/xyz.md` is rejected), and frontmatter
+   `type` ∈ {enhancement,bugfix,refactoring,housekeeping}, `layer` a YAML array of
+   {UX,Domain,Infrastructure,DB,Config}, `effort` ≤ 4h. After `/ticket` writes the
+   file, add one extra frontmatter line `source: owner/repo#n` (the validator
+   ignores unknown fields) so Step 3 idempotency can find it — put the real
+   effort/scope in the body if it exceeds 4h.
 
 2. **Push via the GitHub MCP, NOT `git push`.** Raw `git push` (and `gh api` POST)
    are commonly blocked by permission policy; the GitHub MCP tools are the reliable
-   path. Read the ticket file `/ticket` produced, then:
-   - `mcp__plugin_github_github__create_branch` — branch `ghduty/ticket-<issue#>-<slug>` from the default branch.
-   - `mcp__plugin_github_github__create_or_update_file` — commit the ticket file (`.workaholic/tickets/todo/<...>.md`, pass raw content) to that branch.
+   path. Read the file `/ticket` produced (at its canonical `todo/<user>/…` path),
+   then:
+   - `mcp__plugin_github_github__create_branch` — branch `ghduty/ticket-<issue#>-<slug>` from the default branch (remote name, not subject to the local branch hook).
+   - `mcp__plugin_github_github__create_or_update_file` — commit the ticket **at the same canonical path** `.workaholic/tickets/todo/<user>/<file>.md` (so the target repo's `/drive` finds it), raw content.
 
-3. **Clean up the worktree** when done: `git worktree remove "$WT"` (the branch
-   and its ticket now live on the remote via the MCP push).
+3. **Clean up the worktree**: `git worktree remove --force "$WT"` (the ticket now
+   lives on the remote branch via the MCP push).
 
 If the clone or MCP push fails, note it in the summary instead of losing the item.
 Record `{repo, issue, ticket_path, branch}` for the Slack step.
