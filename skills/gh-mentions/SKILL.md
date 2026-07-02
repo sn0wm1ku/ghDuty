@@ -76,20 +76,24 @@ gh pr comment    <number> -R <owner/repo> --body "<reply>"
 
 ## Step 5 — Slack notify if tickets are pending (optional)
 
-Slack notification is **opt-in**. It fires only when the env var
-`GHDUTY_SLACK_CHANNEL` is set (see the "Slack setup" section of the README) and
-there are pending tickets:
+Slack notification is **opt-in**. It fires only when `GHDUTY_SLACK_WEBHOOK` is
+set (a Slack Incoming Webhook URL — see the "Slack setup" section of the README)
+and there are pending tickets. The webhook posts as its own Slack app, so you
+actually get a notification — a message sent as yourself into your own DM would
+not notify you.
+
+Build `MSG` as a short summary listing each pending ticket by title and the
+mention/PR it came from, then:
 
 ```bash
-[ -n "$GHDUTY_SLACK_CHANNEL" ] && ls .workaholic/tickets/todo/*.md >/dev/null 2>&1 \
-  && echo "notify" || echo "skip"
+if [ -n "$GHDUTY_SLACK_WEBHOOK" ] && ls .workaholic/tickets/todo/*.md >/dev/null 2>&1; then
+  curl -sS -X POST -H 'Content-type: application/json' \
+    --data "$(jq -n --arg t "$MSG" '{text:$t}')" "$GHDUTY_SLACK_WEBHOOK" >/dev/null
+fi
 ```
 
-When it says `notify`, send a message with the Slack MCP send-message tool
-(`mcp__plugin_slack_slack__slack_send_message`) to the channel in
-`$GHDUTY_SLACK_CHANNEL`, listing each pending ticket by title and the
-mention/PR it came from. If the var is unset or `todo/` is empty, skip silently —
-never require Slack to be configured.
+If the var is unset or `todo/` is empty, skip silently — never require Slack to
+be configured.
 
 ## Step 6 — record this run's timestamp
 

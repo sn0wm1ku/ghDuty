@@ -1,6 +1,6 @@
 {
   "name": "ghduty",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "GitHub mention duty — triage issues/PRs that @-mention you across all repos and handle them one by one: reply directly, /ticket on change requests, /code-review on review requests, and optional Slack notify when tickets are left pending.",
   "author": {
     "name": "sn0wm1ku",

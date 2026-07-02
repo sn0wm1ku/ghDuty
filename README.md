@@ -64,20 +64,28 @@ your repos.
 
 ## Slack setup (optional)
 
-Slack notification is **opt-in** and off by default. To get a DM/channel ping
-when a run leaves pending tickets in `.workaholic/tickets/todo/`:
+Slack notification is **opt-in** and off by default. It uses a Slack
+**Incoming Webhook** so the message posts as its own app and actually notifies
+you — a message sent as yourself into your own DM would not trigger a
+notification.
 
-1. Have the Slack MCP plugin connected in Claude Code (so
-   `mcp__plugin_slack_slack__slack_send_message` is available).
-2. Set the target channel via the `GHDUTY_SLACK_CHANNEL` env var — e.g. a
-   channel ID like `C0123456789` or your own DM channel. Add it to your
+To get a ping when a run leaves pending tickets in `.workaholic/tickets/todo/`:
+
+1. Create an Incoming Webhook: <https://api.slack.com/messaging/webhooks> —
+   make a Slack app, enable **Incoming Webhooks**, add one to the channel (or a
+   channel you'll get notified in), and copy the webhook URL
+   (`https://hooks.slack.com/services/T…/B…/…`).
+2. Set it via the `GHDUTY_SLACK_WEBHOOK` env var in your
    [settings.json](https://code.claude.com/docs/en/settings) `env` block:
 
    ```json
-   { "env": { "GHDUTY_SLACK_CHANNEL": "C0123456789" } }
+   { "env": { "GHDUTY_SLACK_WEBHOOK": "https://hooks.slack.com/services/T.../B.../..." } }
    ```
 
-If `GHDUTY_SLACK_CHANNEL` is unset, the Slack step is skipped silently — the
+> **The webhook URL is a secret** — anyone with it can post to your Slack. Keep
+> it in local settings; do not commit it to a dotfiles repo.
+
+If `GHDUTY_SLACK_WEBHOOK` is unset, the Slack step is skipped silently — the
 rest of the workflow works without any Slack config.
 
 ## How last-run tracking works
