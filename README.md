@@ -1,15 +1,18 @@
 # ghDuty
 
-**GitHub mention duty** — a Claude Code plugin that goes through every issue and
-PR that `@`-mentions you, across all your repos, and handles them one at a time:
+**GitHub mention duty** — a Claude Code plugin that runs as an automated agent:
+it checks every issue and PR that `@`-mentions you across all your repos and
+**handles each action request on its own**, no per-item confirmation:
 
-- **A question** → drafts a direct reply.
+- **A question** → replies with the answer.
 - **A change request** → runs `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) so it lands in your `.workaholic/tickets/todo/` queue.
 - **A review request** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
 - **Pending tickets left over** → optionally pings you on Slack.
 
-Only mentions updated **since the last run** are surfaced, so handled threads
-don't come back. The last-run timestamp is kept in the plugin's data dir.
+It handles only mentions with **new activity since the last run**, so nothing is
+touched twice. The **first run just sets a baseline** — it does not drain your
+historical backlog; the agent watches from install onward. The last-run
+timestamp is kept in the plugin's data dir. Designed to run on a schedule.
 
 ## Requirements
 
@@ -46,21 +49,21 @@ added yet, install reports `dependency-unsatisfied` and tells you exactly which
 
 ## Use
 
-In any repo, ask Claude:
-
-```
-go through my GitHub mentions
-```
-
-or invoke the skill directly:
+Run it on demand:
 
 ```
 /gh-mentions
 ```
 
-It lists your open mentions, then walks them one by one. It **confirms with you
-before posting any comment or creating any ticket** — it never bulk-posts across
-your repos.
+or on a schedule so mentions get handled unattended (Claude Code
+[`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
+the skill).
+
+Each run checks mentions with new activity since the last run and **handles each
+action request automatically** — replying, ticketing, or reviewing per what the
+mention asks. The **first run only sets a baseline** and handles nothing, so it
+never floods on your historical backlog. It acts only on repos you own or
+collaborate on.
 
 ## Slack setup (optional)
 
