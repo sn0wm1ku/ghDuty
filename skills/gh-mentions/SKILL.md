@@ -144,7 +144,7 @@ its subtype. An item can be in more than one query; do all that apply.
 |---|---|
 | **assigned ISSUE with a linked PR** (the osbr repos auto-open a PR when you're assigned; you're already assigned on that PR) | Leave an **acknowledgment comment** on the issue: `Acknowledged <UTC date time>.` (signed). The linked PR is handled by the assigned-PR rule below. |
 | **assigned ISSUE with no PR** (usually an idea/discussion — still needs a response) | Open a **ticket** in the repo's clone, **create + push a new branch** for the ticket, then **Slack** to drive it (Step 5). |
-| **assigned PR** | **Closed → skip.** **Open → gap-fill:** read the PR diff *and its linked issue* — the objective/to-do usually lives in the issue, not the PR. Identify what the issue asks that the PR hasn't done yet, and open a **ticket** (clone + pushed branch + Slack, same as an idea-issue) describing the gap to fill. If the PR already fully satisfies the issue, leave a signed ack comment instead. |
+| **assigned PR** | **Closed → skip.** **Open → gap-fill:** read the PR diff *and its linked issue* — the objective/to-do usually lives in the issue, not the PR. Identify what the issue asks that the PR hasn't done yet, and open a **ticket** (clone + pushed branch + Slack, same as an idea-issue) describing the gap to fill. **If the work is already fully shipped / no gap remains, don't ticket** — leave a signed comment stating it looks shipped (cite the evidence) and **suggesting the issue/PR be closed**. |
 | **review-requested**, or a comment asking for review | Run `/code-review` on that PR, post the findings as a reply. |
 | **mentioned**, and the mention asks something | Reply — answer a question, or ticket + reply if it's a change request. **Skip if the mentioning comment itself is >2 years old** (judge by the comment's `created_at`, not the issue's; a stale @ isn't worth answering). |
 | Genuinely nothing to do (pure FYI, an ack, already resolved) | Skip. |
@@ -152,6 +152,11 @@ its subtype. An item can be in more than one query; do all that apply.
 Age note: the 2-year cutoff applies **only** to the mention line. Assigned items
 and review requests are handled regardless of age (an assigned task still needs
 doing; a review is still requested).
+
+Already-shipped note: whenever handling reveals the work is **already done and
+merged** (verified in code), don't file a ticket — post a signed comment citing
+the evidence and **suggesting the issue/PR be closed**. That comment is also the
+signature marker, so the item won't be re-processed next run.
 
 **Detecting a linked PR** for an assigned issue: check the issue's timeline /
 `closedByPullRequestsReferences`, or search `gh pr list -R <repo> --search "<issue#>"`.
