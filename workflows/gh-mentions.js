@@ -79,9 +79,20 @@ const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** 
    - review-requested (or a comment asking for review) → run /code-review, post findings signed. If LGTM / no blocking findings, ALSO submit a real approval via pull_request_review_write (method create, event APPROVE) → action="approved"; if blocking, request changes / comment → action="reviewed".
    - mention asking something → reply (or ticket+reply if a change request), signed → "replied".
    - nothing to do → action="skipped-noaction", post nothing.
-6. If verdict is no-action, RECORD in the ledger (parallel-safe, own key only):
+6. RECORD in the ledger for EVERY terminal verdict — acted (ack/reply/review/approve/
+   ticket) AND no-action — so next run FAST-SKIPS it (no subagent, no thread read)
+   unless there's newer activity. This is the token win: don't re-read already-signed
+   threads every run. **Use the thread's CURRENT updatedAt** (re-read it AFTER you
+   posted, since your own comment bumps it — else next run sees a newer updatedAt and
+   re-handles). If you posted nothing (no-action / skipped-signed), the queried
+   updatedAt is already current. Write parallel-safe (own key only):
    LED="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"; f="$LED/$(echo "${it.repo}#${it.number}" | tr '/#' '__').json"
-   tmp="$(mktemp)"; jq -n --arg u "${it.updatedAt || ''}" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+   U=$(gh ${it.isPR ? 'pr' : 'issue'} view ${it.number} -R ${it.repo} --json updatedAt -q .updatedAt)
+   tmp="$(mktemp)"; jq -n --arg u "$U" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+   (Skip the ledger write only on action="error". The signed comment remains the
+   durable correctness record; the ledger is just the efficiency cache. New activity
+   after our signature bumps updatedAt → the fast-skip misses → the item is re-handled,
+   which is exactly right.)
 7. Return the structured result: include the issue/PR title, its **url** (html_url of the issue/PR, e.g. https://github.com/${it.repo}/${it.isPR ? 'pull' : 'issues'}/${it.number}), and branch for tickets.
 
 Signature block to append to every posted comment:
@@ -116,24 +127,26 @@ for (const [act, label] of SECTIONS) {
   if (rs.length) msg += `\n\n*${label} (${rs.length}):*\n` + rs.map(fmt).join('\n')
 }
 
+// Slack delivery: in auto mode the agent cannot send an external write by any
+// route (curl, settings-grant, outbox-for-hook) — that's by design. So this only
+// ATTEMPTS the send honestly; if the classifier blocks it, it returns the exact
+// ready-to-run curl for the user to run themselves (or to run outside auto mode).
 let notified = false
 if (results.length) {
   const n = await agent(
-    `Queue this ghDuty run notification for Slack by WRITING it to the outbox — do NOT curl it yourself (the harness's flush-slack Stop hook delivers it, which avoids the auto-mode external-write block). Only if GHDUTY_SLACK_WEBHOOK is set (else return {sent:false, reason:"no webhook"}). Steps:
+    `If GHDUTY_SLACK_WEBHOOK is set, attempt to POST this notification to Slack (message text VERBATIM — every item listed, don't collapse):
 
-  OUT="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/slack-outbox"; mkdir -p "$OUT"
-  # write the message VERBATIM (every item listed, never collapsed) as a Slack payload:
   MSG_TEXT=$(cat <<'MSGEOF'
 ${msg}
 MSGEOF
 )
-  jq -n --arg t "$MSG_TEXT" '{text:$t}' > "$OUT/ghduty-$(date +%s).json"
+  curl -sS -X POST -H 'Content-type: application/json' --data "$(jq -n --arg t "$MSG_TEXT" '{text:$t}')" "$GHDUTY_SLACK_WEBHOOK"
 
-Writing a local file is allowed (not an external write), so this is never blocked. Return {sent:true} once the outbox file is written (it will be delivered on the next Stop). If GHDUTY_SLACK_WEBHOOK is unset, return {sent:false, reason:"no webhook"}.`,
-    { label: 'slack-queue', schema: { type: 'object', properties: { sent: { type: 'boolean' }, reason: { type: 'string' } }, required: ['sent'] }, agentType: 'general-purpose' }
+Do NOT try to talk around or bypass any permission denial. Return {sent:true} on HTTP 200. If it's denied, return {sent:false, reason:"blocked — run this yourself: <the exact curl command with the payload>"}. If no webhook, {sent:false, reason:"no webhook"}.`,
+    { label: 'slack-send', schema: { type: 'object', properties: { sent: { type: 'boolean' }, reason: { type: 'string' } }, required: ['sent'] }, agentType: 'general-purpose' }
   )
   notified = !!(n && n.sent)
-  if (!notified) log(`Slack notify not queued: ${(n && n.reason) || 'unknown'}`)
+  if (!notified) log(`Slack notify not sent: ${(n && n.reason) || 'unknown'}`)
 }
 
 const by = {}

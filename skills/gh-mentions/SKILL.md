@@ -172,18 +172,23 @@ skill's flow; don't improvise a fan-out that drops this step.)
    is the durable, remote marker instead. A thread becomes actionable again only
    when someone comments after ghDuty's signed comment (i.e. real follow-up).
 3. **Classify** (table below) and **handle** per Step 4, signed.
-4. **Return** the structured result, and — if the verdict is **no action needed**
-   (nothing actionable — a bare FYI, an ack, a resolved thread) — **record it in the
-   agent itself** by writing its own per-key ledger file (parallel-safe: distinct
-   path per key, atomic temp + rename):
+4. **Return** the structured result, and **record a ledger entry for EVERY terminal
+   verdict — acted (ack/reply/review/approve/ticket) AND no-action** — so the next run
+   fast-skips it with **no subagent and no thread read** (this is the token win:
+   don't re-read the 20+ already-signed threads every run just to re-confirm the
+   signature). Write the agent's own per-key file (parallel-safe: distinct path,
+   atomic temp+rename) with the thread's **current** `updatedAt` — re-read it *after*
+   posting, since your own comment bumps it:
    ```bash
-   f="$(key "<owner>/<repo>#<n>")"; tmp="$(mktemp)"
-   jq -n --arg u "<updatedAt>" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+   f="$(key "<owner>/<repo>#<n>")"
+   U=$(gh {issue|pr} view <n> -R <owner/repo> --json updatedAt -q .updatedAt)   # current, post-action
+   tmp="$(mktemp)"; jq -n --arg u "$U" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
    ```
-   so the fast-skip suppresses it next run until new activity bumps `updatedAt`.
-   Items that were *acted on* are NOT ledgered — their signed comment is the marker.
-   (Because each agent writes only its own key's file, parallel workers never race —
-   no shared-file append, no lock.)
+   New activity after our signature bumps `updatedAt` → the fast-skip misses → the
+   item is re-handled, exactly when it should be. The signed comment stays the durable
+   correctness record; the ledger is purely the efficiency cache (safe to lose). Skip
+   the ledger write only on `error`. (Each agent writes only its own key's file, so
+   parallel workers never race — no shared-file append, no lock.)
 
 Action is driven by **which query surfaced the item** and, for assigned items,
 its subtype. An item can be in more than one query; do all that apply.
