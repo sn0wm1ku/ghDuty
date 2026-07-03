@@ -124,6 +124,11 @@ extra token scope; true per-sprint/iteration filtering needs `read:project`
 (`gh auth refresh -s read:project`) — without it, the board's current items stand in
 for the active sprints.
 
+Rather than hand-editing `GHDUTY_EXTRA_REPOS`, use the **`/manage-repos`** tool to
+add/remove/list extra repos (`/manage-repos add otherorg/repo`); it validates the
+repo exists and persists it to a config file the summary reads (unioned with the env
+var and board).
+
 or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).

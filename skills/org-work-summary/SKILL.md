@@ -62,6 +62,12 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
   stand in for "the active sprints".
 - **`GHDUTY_EXTRA_REPOS`** *(optional)* — comma-separated `owner/repo` list of extra
   repos to always include (incl. non-org), for teams without a board.
+- **plugin config file** — `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/config.json`,
+  the plugin's **own** config (not Claude's `settings.json`), holding `extra_repos`.
+  Managed by the **`manage-repos`** skill (`/manage-repos add owner/repo`) so users
+  don't hand-edit settings. Read as an addition to `GHDUTY_EXTRA_REPOS` (below). This
+  is durable config, kept separate from the append-only cache (gh-mentions'
+  `skip-ledger.jsonl`) — don't conflate the two.
 
 ```bash
 [ -n "$GHDUTY_ORG" ] && echo "org: $GHDUTY_ORG" || echo "GHDUTY_ORG unset — ask the user"
@@ -114,8 +120,17 @@ gh search issues --owner="$GHDUTY_ORG" --state=open --limit 200 \
 
 `--owner=$GHDUTY_ORG` only sees repos *in the org*. Work in a parent-company org, a
 personal fork, or a partner repo is invisible to it — which silently under-counts
-contributors (someone's whole week can live in `otherorg/repo`). If `GHDUTY_PROJECT`
-or `GHDUTY_EXTRA_REPOS` is set, also gather those repos:
+contributors (someone's whole week can live in `otherorg/repo`). The extra-repo set
+is the **union** of three sources — the `GHDUTY_EXTRA_REPOS` env var, the
+`manage-repos` config file, and (if set) the `GHDUTY_PROJECT` board:
+
+```bash
+CFG="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/config.json"
+{ echo "$GHDUTY_EXTRA_REPOS" | tr ',' '\n'; [ -f "$CFG" ] && jq -r '.extra_repos[]? // empty' "$CFG"; } \
+  | sed 's/^ *//;s/ *$//' | grep -E '^[^/ ]+/[^/ ]+$' | sort -u   # extra repos to include
+```
+
+If `GHDUTY_PROJECT` or any extra repo is present, also gather those repos:
 
 ```bash
 # repos referenced by the board (works with NO read:project scope):
