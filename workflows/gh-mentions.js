@@ -1,0 +1,116 @@
+export const meta = {
+  name: 'gh-mentions',
+  description: 'ghDuty: handle the durable GitHub queue (review-requested + assigned + mentioned, all open) — discover & dedupe, apply the ledger fast-skip, one agent per item (idempotent by signature, ownership-gated, LGTM auto-approve, ticket+push via MCP), then Slack-notify tickets in the canonical format. Deterministic: the whole orchestration lives here so no step is dropped.',
+  phases: [
+    { title: 'Discover', detail: '3 durable gh searches, dedupe, ledger fast-skip' },
+    { title: 'Handle', detail: 'one agent per item: idempotency, classify, act (signed)' },
+    { title: 'Notify', detail: 'Slack ticket notification in canonical format' },
+  ],
+}
+
+const QUEUE = {
+  type: 'object',
+  properties: { items: { type: 'array', items: {
+    type: 'object',
+    properties: {
+      repo: { type: 'string' }, number: { type: 'integer' },
+      isPR: { type: 'boolean' }, srcs: { type: 'array', items: { type: 'string' } },
+      updatedAt: { type: 'string' }, title: { type: 'string' },
+    },
+    required: ['repo', 'number', 'isPR', 'srcs'],
+  } }, skipped_by_ledger: { type: 'integer' } },
+  required: ['items'],
+}
+
+const RESULT = {
+  type: 'object',
+  properties: {
+    repo: { type: 'string' }, number: { type: 'integer' }, title: { type: 'string' },
+    action: { type: 'string', enum: ['replied', 'acked', 'ticketed', 'reviewed', 'approved', 'skipped-signed', 'skipped-stale', 'skipped-not-mine', 'skipped-noaction', 'error'] },
+    branch: { type: 'string' }, note: { type: 'string' },
+  },
+  required: ['repo', 'number', 'action', 'note'],
+}
+
+const LED = "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"
+
+// ── Discover: search, dedupe, migrate + apply ledger fast-skip ───────────────
+phase('Discover')
+const disc = await agent(
+  `ghDuty gh-mentions DISCOVERY. Do all of this with the gh CLI + jq and return the deduped, ledger-filtered work set.
+
+1. Run the three durable queries:
+   gh search prs    --review-requested=@me --state open --limit 100 --json repository,number,title,url,updatedAt
+   gh search issues --assignee=@me   --include-prs --state open --limit 100 --json repository,number,title,url,isPullRequest,updatedAt
+   gh search issues --mentions=@me   --include-prs --state open --limit 100 --json repository,number,title,url,isPullRequest,updatedAt
+2. Dedupe by repo#number; union the source tags (review/assigned/mention) into srcs.
+3. LEDGER SETUP + ONE-TIME MIGRATION (mandatory):
+   DIR="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}"; LED="$DIR/skip-ledger"; mkdir -p "$LED"
+   key(){ echo "$LED/$(echo "$1" | tr '/#' '__').json"; }
+   # migrate a legacy single-file ledger so its entries still count, then retire it:
+   if [ -f "$DIR/skip-ledger.jsonl" ]; then
+     jq -c '.' "$DIR/skip-ledger.jsonl" | while IFS= read -r l; do
+       r=$(echo "$l" | jq -r '.repo'); n=$(echo "$l" | jq -r '.number')
+       [ -n "$r" ] && [ "$r" != null ] && echo "$l" > "$(key "$r#$n")"; done
+     mv "$DIR/skip-ledger.jsonl" "$DIR/skip-ledger.jsonl.migrated"
+   fi
+4. LEDGER FAST-SKIP (mandatory, never bypass): for each deduped item, read its per-key
+   file "$(key repo#n)"; if it exists AND its updatedAt EQUALS the query's updatedAt
+   (no new activity), DROP it from the work set. Count how many you dropped.
+5. Return {items:[{repo,number,isPR,srcs,updatedAt,title}], skipped_by_ledger:<count>}.`,
+  { label: 'discover', schema: QUEUE, agentType: 'general-purpose' }
+)
+const items = (disc && disc.items) || []
+log(`${items.length} actionable · ${(disc && disc.skipped_by_ledger) || 0} fast-skipped by ledger`)
+
+// ── Handle: one agent per item ───────────────────────────────────────────────
+phase('Handle')
+const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** (isPR=${it.isPR}, via: ${(it.srcs || []).join('+')}, updatedAt=${it.updatedAt || '?'}). Act autonomously, no questions. All remote writes via the GitHub MCP (add_issue_comment / create_branch / create_or_update_file / pull_request_review_write) — never git push / gh write.
+
+1. OWNERSHIP GATE FIRST: gh api repos/${it.repo} --jq .permissions ; if the user is not owner/collaborator (push/admin), return action="skipped-not-mine", post nothing.
+2. Read the thread: gh ${it.isPR ? 'pr' : 'issue'} view ${it.number} -R ${it.repo} --comments
+3. IDEMPOTENCY: if a comment with signature "auto-posted by sn0wm1ku/ghDuty" exists with NOTHING newer after it → action="skipped-signed".
+4. STALENESS: if srcs is exactly ["mention"] and the mentioning comment's created_at is >2 years ago → action="skipped-stale". (assigned/review handled regardless of age.)
+5. CLASSIFY & ACT (sign every posted comment with the signature block below):
+   - assigned ISSUE with a linked PR → ack comment on the issue, action="acked".
+   - assigned ISSUE, no PR → run workaholic /ticket in the repo clone under \${GHDUTY_WORK_DIR:-$HOME/Projects}/${it.repo}, push a ghduty/ticket-* branch via MCP, signed comment; action="ticketed", set branch.
+   - assigned OPEN PR → read diff + linked issue; gap → ticket (as above, "ticketed"); already shipped → signed comment suggesting close ("acked").
+   - review-requested (or a comment asking for review) → run /code-review, post findings signed. If LGTM / no blocking findings, ALSO submit a real approval via pull_request_review_write (method create, event APPROVE) → action="approved"; if blocking, request changes / comment → action="reviewed".
+   - mention asking something → reply (or ticket+reply if a change request), signed → "replied".
+   - nothing to do → action="skipped-noaction", post nothing.
+6. If verdict is no-action, RECORD in the ledger (parallel-safe, own key only):
+   LED="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"; f="$LED/$(echo "${it.repo}#${it.number}" | tr '/#' '__').json"
+   tmp="$(mktemp)"; jq -n --arg u "${it.updatedAt || ''}" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+7. Return the structured result (include branch for tickets, and the issue/PR title).
+
+Signature block to append to every posted comment:
+---
+<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-4-8)</sub>`
+
+const results = (await parallel(items.map(it => () =>
+  agent(handle(it), { label: `${it.repo}#${it.number}`, schema: RESULT, agentType: 'general-purpose' })
+))).filter(Boolean)
+
+// ── Notify: Slack ticket notification, canonical format ──────────────────────
+phase('Notify')
+const tickets = results.filter(r => r.action === 'ticketed')
+let notified = false
+if (tickets.length) {
+  const lines = tickets.map(t => `• *${t.repo}#${t.number}* — ${t.title || '(ticket)'}\n  branch \`${t.branch || '?'}\` · run \`/drive\` to implement`).join('\n')
+  const n = await agent(
+    `Send the ghDuty Slack ticket notification, but ONLY if GHDUTY_SLACK_WEBHOOK is set (else return {sent:false, reason:"no webhook"}). Use EXACTLY this canonical format as the message text (Slack mrkdwn):
+
+:ticket: *ghDuty — ${tickets.length} ticket(s) created*
+${lines}
+
+POST it: curl -sS -X POST -H 'Content-type: application/json' --data "$(jq -n --arg t "$MSG" '{text:$t}')" "$GHDUTY_SLACK_WEBHOOK"
+If the POST is denied by the auto-mode classifier (missing autoMode.allow grant), return {sent:false, reason:"blocked-need-grant"} and include the ready-to-run curl in reason — do NOT treat it as a run failure. Return {sent:true} on HTTP 200.`,
+    { label: 'slack-notify', schema: { type: 'object', properties: { sent: { type: 'boolean' }, reason: { type: 'string' } }, required: ['sent'] }, agentType: 'general-purpose' }
+  )
+  notified = !!(n && n.sent)
+  if (!notified) log(`Slack notify not sent: ${(n && n.reason) || 'unknown'}`)
+}
+
+const by = {}
+for (const r of results) by[r.action] = (by[r.action] || 0) + 1
+return { total: items.length, fast_skipped: (disc && disc.skipped_by_ledger) || 0, by, notified, tickets: tickets.map(t => ({ repo: t.repo, number: t.number, branch: t.branch })) }

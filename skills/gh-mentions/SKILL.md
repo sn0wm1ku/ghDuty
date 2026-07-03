@@ -109,39 +109,32 @@ out (stale >2yr mention, closed PR, etc.). No first-run gate, no checkbox — th
 signature is what stops re-handling, and the durable queries + filters are what
 scope the work. Built to run unattended.
 
-## Step 3 — fan out via the Workflow tool (parallel, capped ~10)
+## Step 3 — run the bundled workflow (deterministic; do NOT hand-author a fan-out)
 
-Handle the queue with the **Workflow tool**, not ad-hoc `Agent` calls — one
-`agent()` per queue item inside a `parallel()`, so concurrency is **auto-capped at
-`min(16, cores−2)` ≈ 10** (a hand-rolled fan-out of 20+ `Agent` calls has no cap
-and hammers `gh` / rate limits). The workflow is deterministic and resumable, and
-each `agent()` returns
-`{repo, number, action: replied|ticketed|reviewed|skipped, ticket_path?, updatedAt, note}`
-which the script collects for Steps 4–5.
-
-Workflow shape:
+**Invoke the committed workflow script — do not re-improvise the orchestration.**
+The full flow (discover + dedupe + **ledger fast-skip** + one agent per item +
+Slack notify) lives in one script so no step is ever dropped:
 
 ```
-// after Step 1 dedupe + the ledger fast-skip below, `items` is the work set
-phase('Handle')
-const results = await parallel(items.map(it => () =>
-  agent(handlePrompt(it), { label: `${it.repo}#${it.number}`, schema: RESULT })
-))
-// then Steps 4–5 from results.filter(Boolean)
+Workflow({ scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/gh-mentions.js" })
 ```
 
-- **Pre-clone unique repos before the parallel stage** (a barrier): dedupe target
-  repos and clone each once first — concurrent clones of the *same* repo clash.
-  Alternatively give ticket-writing agents `isolation: 'worktree'` so parallel
-  `/ticket` on one repo can't collide. Separate `/ticket` writes into an existing
-  clone are safe.
-- Each `agent()` must have the `workaholic` and `code-review` skills available (it
-  runs `/ticket` / `/code-review`) and does all remote writes through the **GitHub
-  MCP** (branch, file commit, comment) — never `git push` / `gh` write commands,
-  which permission policy often blocks.
-- **Parallel recording is safe** because the skip-ledger is one-file-per-key: a
-  no-action agent writes only its own `<owner>__<repo>__<n>.json` (atomic temp +
-  rename), so concurrent workers never contend (see the recording step below).
+That is the single source of truth for execution. It fans out via `parallel()`
+(concurrency auto-capped at `min(16, cores−2)`), each item handled by its own
+`general-purpose` agent that does all remote writes through the **GitHub MCP**
+(never `git push`/`gh` write), applies the ledger fast-skip **and** records
+no-action items, auto-approves LGTM reviews, and sends the Step 5 Slack notice in
+the canonical format. **Never** substitute an ad-hoc `Agent` fan-out or a
+hand-written workflow — that is exactly how the ledger fast-skip and Slack step got
+dropped before, re-creating already-ledgered tickets.
+
+The sections below **document what the script does** (per-item classification,
+idempotency, ledger, signature) — they are the spec the script implements, not a
+second thing to run by hand.
+
+- The skip-ledger is **one-file-per-key**, so the script's parallel agents each
+  write only their own `<owner>__<repo>__<n>.json` (atomic temp+rename) — no
+  shared-file race, no lock.
 
 **Ledger fast-skip (orchestrator, before fan-out).** For each queue item, read its
 per-key file `skip-ledger/<owner>__<repo>__<n>.json`: if it exists with the **same
