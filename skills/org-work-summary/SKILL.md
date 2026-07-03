@@ -87,12 +87,16 @@ directly — they don't need deep analysis.
 
 Titles and descriptions lie or omit; the **diff** is the ground truth. Spawn
 **one subagent per PR** in the work-set (`Agent` tool, launched in parallel —
-multiple calls in one message). Each subagent reads the diff *and* the linked
-issue, then judges the PR against **what it set out to do**, not just what its
-description claims.
+multiple calls in one message), each as the **`schedule-planner`** agent type
+(`subagent_type: "schedule-planner"`) — a delivery-progress analyst persona, not
+the general-purpose one. It reads the diff *and* the linked issue and judges the
+PR against **what it set out to do**, not what its description claims.
 
-Dedupe repos and keep each subagent read-only (`gh` reads + MCP reads only — this
-skill never writes). Each returns the structured verdict below.
+For a **merged** PR's quality verdict, the schedule-planner delegates the actual
+code review to the **`/code-review` skill / code-reviewer expert** and folds those
+findings back into the objective/schedule view — the persona does not hand-roll a
+code review. Keep every subagent read-only (`gh` reads + `/code-review`, which
+also only reads — never a write). Each returns the structured verdict below.
 
 ### What each per-PR subagent does
 
@@ -115,11 +119,12 @@ skill never writes). Each returns the structured verdict below.
      then check each against the diff: **implemented / partial / not started**.
      Report a fraction (`4/6 done`), what's **left to go**, and any blockers or
      TODO/`FIXME`/stub markers left in the diff.
-   - **Merged (complete)** → assess **quality**. Does the diff actually satisfy
-     the objective? Call out what's **done well** (tests added, edge cases,
-     clean structure) and **room for improvement** (missing tests, unhandled
-     errors, silent failures, hard-coded values, scope the issue asked for but the
-     diff skipped). Ground every point in a file/hunk from the diff.
+   - **Merged (complete)** → assess **quality** by running the **`/code-review`
+     skill** on the PR (the code-reviewer expert finds the correctness bugs,
+     missing tests, silent failures, etc. — don't hand-roll it). Fold its findings
+     into an objective-level verdict: what's **done well** and **room for
+     improvement** / follow-up debt for next week's plan. Ground every point in a
+     file/hunk from the diff or a code-review finding.
 4. **Return** `{repo, number, author, state, objective, verdict: progress|quality,
    fraction_done?, remaining?, strengths?, improvements?, one_line}` — `one_line`
    is a single-sentence takeaway for the summary.
@@ -179,8 +184,14 @@ speculation beyond what the code shows.
   Re-running just re-reads the week.
 - **Two granularities.** Org-wide `gh search` (Step 2) scopes the *list* in one
   query per category — no per-repo fan-out for discovery. The *depth* (Step 3)
-  fans out one read-only subagent per PR to read its diff + linked issue; a busy
-  org may cap at `--limit`, surfaced in Step 2, and many PRs means many subagents.
+  fans out one **`schedule-planner`** subagent per PR (a delivery-progress persona
+  shipped with this plugin, not general-purpose) to read its diff + linked issue;
+  a busy org may cap at `--limit`, surfaced in Step 2, and many PRs means many
+  subagents.
+- **Division of labor.** The schedule-planner owns *progress and schedule*
+  judgment. Actual code review stays with the `/code-review` skill and its expert
+  — the planner invokes it for merged-PR quality and translates the findings into
+  plan terms, rather than reviewing code itself.
 - The diff is the ground truth — a PR's own description is a claim, not a fact.
   Progress and quality verdicts must cite the diff, not the description.
 - Date math is BSD `date` (macOS); the inline comment gives the GNU `date`

@@ -77,6 +77,12 @@ description) to judge it against what it set out to do:
 - **merged PRs** → **quality**: what was done well and any room for improvement,
   each point cited to a hunk in the diff.
 
+The per-PR analysis runs as a dedicated **`schedule-planner`** agent persona
+(shipped with this plugin) — a delivery-progress analyst, not the general-purpose
+agent. It owns *progress and schedule* judgment; the actual code review for
+merged PRs is delegated to the `/code-review` skill and its expert, whose
+findings the planner folds into plan terms.
+
 It then writes **what shipped**, **what's in flight (with progress)**, a
 **per-repo issue status** (completed this week vs pending — pending split into
 *active assigned*, *active unassigned*, and *iceboxed*), **per-repo commit counts
