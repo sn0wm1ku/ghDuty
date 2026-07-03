@@ -1,6 +1,6 @@
 {
   "name": "ghduty",
-  "version": "0.1.17",
+  "version": "0.2.0",
   "description": "GitHub duty — automated agent whose core job is to automate your pending tasks. From durable GitHub state (assigned + mentioned + review-requested, open, all repos) it handles each item by subtype in parallel: assigned issue with a linked PR → signed acknowledgment comment; assigned idea-issue with no PR → ticket + pushed branch in the repo's clone + Slack to /drive; assigned open PR → read the PR and its linked issue, find the gap, open a ticket to fill it (closed PR → skip); mention → reply (skip if the mentioning comment is >2yr old); review request → /code-review. Idempotent by reply signature / existing ticket. Built to run on a schedule.",
   "author": {
     "name": "sn0wm1ku",

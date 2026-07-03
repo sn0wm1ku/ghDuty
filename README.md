@@ -63,6 +63,21 @@ Run it on demand:
 /gh-mentions
 ```
 
+### Org weekly summary
+
+A separate read-only skill, `/org-work-summary`, summarizes a whole org's work
+for **the current week** (last Saturday through today — the week is assumed to
+end on a Friday, but the range is computed so it works any day). It pulls
+org-wide search state (merged/opened PRs, closed/opened issues, commits) scoped
+to the week and writes **what shipped** plus a **per-contributor breakdown**. It
+posts nothing and keeps no state — just a report.
+
+Set the org via `GHDUTY_ORG` in your settings `env` block (it asks if unset):
+
+```json
+{ "env": { "GHDUTY_ORG": "your-org" } }
+```
+
 or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).
