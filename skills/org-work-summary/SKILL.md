@@ -61,10 +61,23 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
   addition to `GHDUTY_EXTRA_REPOS` (below). Kept separate from the gh-mentions cache
   (`skip-ledger/`).
 
+**Auto-load the extra-repos config at bootstrap** and show it, so the user sees the
+exact scope before the run — then remind them it's editable. This is the only
+config surface to confirm each run:
+
 ```bash
 [ -n "$GHDUTY_ORG" ] && echo "org: $GHDUTY_ORG" || echo "GHDUTY_ORG unset — ask the user"
-echo "extra repos: ${GHDUTY_EXTRA_REPOS:-none}"
+REPOS="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/extra-repos.txt"
+loaded=$( { echo "$GHDUTY_EXTRA_REPOS" | tr ',' '\n'; [ -f "$REPOS" ] && grep -vE '^\s*#' "$REPOS"; } \
+  | sed 's/^ *//;s/ *$//' | grep -E '^[^/ ]+/[^/ ]+$' | sort -u )
+n=$(echo "$loaded" | grep -c . || true)
+echo "extra repos loaded ($n):"; [ -n "$loaded" ] && echo "$loaded" | sed 's/^/  /' || echo "  (none)"
 ```
+
+**Close the bootstrap by telling the user the list is editable:** e.g. *"Including N
+extra repos beyond org `<org>`. Update anytime with `/manage-repos` (add / remove /
+list, or point at a file) — changes apply next run."* Surface this every run so the
+scope is never a surprise.
 
 ## Step 1 — compute the week window
 

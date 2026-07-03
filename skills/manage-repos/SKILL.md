@@ -75,7 +75,7 @@ Then show the updated `list`.
 ## Notes
 
 - `org-work-summary` reads this file **unioned with** the `GHDUTY_EXTRA_REPOS` env
-  var and any `GHDUTY_PROJECT` board repos.
+  var.
 - Repos here are queried with `gh search … -R <owner/repo>` (per-repo), so non-org
   repos the `GHDUTY_ORG` search can't see get counted.
 - Read-only elsewhere: this tool only writes its own `extra-repos.txt`; it never
