@@ -20,7 +20,8 @@ const VERDICT = {
   required: ['repo', 'number', 'one_line'],
 }
 
-const prs = (args && args.prs) || []
+const _a = (typeof args === 'string') ? JSON.parse(args) : args
+const prs = (_a && _a.prs) || []
 log(`deep-reading ${prs.length} PRs via schedule-planner (parallel, org + extra)`)
 
 phase('Analyze')
