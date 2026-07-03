@@ -159,20 +159,23 @@ bound, not the truth. Never present a capped number as complete.
 > *not planned*, so treat closed issues as completed unless a subagent read reveals
 > otherwise, and say the abandoned-issue count is PR-based + best-effort.
 
-## Step 3 — deep-analyze each PR (fan out, parallel)
+## Step 3 — deep-analyze each PR via the bundled workflow (parallel; do NOT hand-launch)
 
-Spawn **one subagent per PR** in the work-set — **org and extra (non-org) repos
-alike**; a non-org PR is read with `gh pr view/diff -R <owner/repo>` and gets the
-same verdict as an org one, never just a tally. Each subagent is the
-**`schedule-planner`** agent type (`subagent_type: "schedule-planner"`) — a
-delivery-progress analyst persona, not the general-purpose one. It reads the diff
-*and* the linked issue and judges the PR against **what it set out to do**, not what
-its description claims. The persona file (`agents/schedule-planner.md`) carries the
-full method; the essentials:
+**Invoke the committed workflow — don't launch schedule-planner `Agent` calls one at
+a time** (that's slow and drifts). Build the PR work-set in Step 2 (code: merged ∪
+open, org ∪ extra, each `{repo, number, isPR, state, author, title, url}`), then:
 
-> Concurrency: launched in parallel; if the work-set is large (many extra/client
-> repos), cap in-flight subagents at ~10 (waves), or orchestrate via the **Workflow
-> tool**'s `parallel()` (auto-capped) as gh-mentions does — don't fire 30+ at once.
+```
+Workflow({ name: "ghduty:org-work-summary",
+           args: { prs: <the PR work-set array> } })
+```
+
+It fans out via `parallel()` (concurrency auto-capped `min(16, cores−2)`), **one
+`schedule-planner` agent per PR** — org and extra (non-org) repos alike; a non-org PR
+is read with `gh pr view/diff -R <owner/repo>` and gets the same verdict, never just a
+tally. It returns `{ verdicts: [...] }` (one structured verdict per PR) which Step 4
+turns into the report. The persona (`agents/schedule-planner.md`) carries the full
+method; the essentials:
 
 - **Open PR → progress.** Measure "how far / what's left" against the linked
   issue's **acceptance criteria / Definition of Done** — unchecked items are the
