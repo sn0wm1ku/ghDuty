@@ -106,6 +106,24 @@ Set the org via `GHDUTY_ORG` in your settings `env` block (it asks if unset):
 { "env": { "GHDUTY_ORG": "your-org" } }
 ```
 
+Teams often work in repos **outside** the org (a parent company's org, a personal
+fork), which an org-only search misses — under-counting whoever's week lived there.
+Two optional knobs widen the scope:
+
+```json
+{ "env": {
+    "GHDUTY_ORG": "your-org",
+    "GHDUTY_PROJECT": "your-org/7",
+    "GHDUTY_EXTRA_REPOS": "otherorg/repo,someone/fork"
+} }
+```
+
+`GHDUTY_PROJECT` points at an org Project board; the report widens to **every repo
+referenced by items on that board** (non-org included). Board filtering needs no
+extra token scope; true per-sprint/iteration filtering needs `read:project`
+(`gh auth refresh -s read:project`) — without it, the board's current items stand in
+for the active sprints.
+
 or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
 the skill).

@@ -52,9 +52,20 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
   (`AskUserQuestion`) and tell them to persist it in their
   [settings.json](https://code.claude.com/docs/en/settings) `env` block:
   `"env": { "GHDUTY_ORG": "<org>" }`. No run-state, no local files.
+- **`GHDUTY_PROJECT`** *(optional)* — an org Project board as `<owner>/<number>`
+  (e.g. `osbrjp/7`). The team's real work often spans repos **outside** the org
+  (a parent company's org, a personal fork), which an org-only search silently
+  misses. When set, the repo set is **widened to every repo referenced by items on
+  that board** (Step 2), so non-org work is counted. `gh search --project` filtering
+  needs **no extra token scope**; true per-sprint/iteration filtering *does* need
+  `read:project` (see Step 2 note), so absent that scope the board's current items
+  stand in for "the active sprints".
+- **`GHDUTY_EXTRA_REPOS`** *(optional)* — comma-separated `owner/repo` list of extra
+  repos to always include (incl. non-org), for teams without a board.
 
 ```bash
 [ -n "$GHDUTY_ORG" ] && echo "org: $GHDUTY_ORG" || echo "GHDUTY_ORG unset — ask the user"
+echo "board: ${GHDUTY_PROJECT:-none}   extra repos: ${GHDUTY_EXTRA_REPOS:-none}"
 ```
 
 ## Step 1 — compute the week window
@@ -98,6 +109,35 @@ gh search prs --owner="$GHDUTY_ORG" --state=open --limit 200 \
 gh search issues --owner="$GHDUTY_ORG" --state=open --limit 200 \
   --json repository,number,title,url,assignees,labels,createdAt,updatedAt
 ```
+
+### Widen to non-org repos (board / extra repos)
+
+`--owner=$GHDUTY_ORG` only sees repos *in the org*. Work in a parent-company org, a
+personal fork, or a partner repo is invisible to it — which silently under-counts
+contributors (someone's whole week can live in `otherorg/repo`). If `GHDUTY_PROJECT`
+or `GHDUTY_EXTRA_REPOS` is set, also gather those repos:
+
+```bash
+# repos referenced by the board (works with NO read:project scope):
+if [ -n "$GHDUTY_PROJECT" ]; then
+  { gh search prs    --project "$GHDUTY_PROJECT" --limit 300 --json repository
+    gh search issues --project "$GHDUTY_PROJECT" --limit 300 --json repository; } \
+  | jq -r '.[].repository.nameWithOwner' | sort -u    # the working repo set, incl. non-org
+fi
+# for each repo NOT under $GHDUTY_ORG (and each GHDUTY_EXTRA_REPOS entry), re-run the
+# same THROUGHPUT + WIP queries scoped with -R <owner/repo> instead of --owner, e.g.:
+#   gh search commits --repo "ozcoltd/nrha-main" --author-date="$SINCE..$UNTIL" --limit 100 --json author,repository,sha
+#   gh search prs     --repo "ozcoltd/nrha-main" --merged --merged-at="$SINCE..$UNTIL" --limit 100 --json repository,number,title,author,url,closedAt
+# then union into the same sets below. (commits search rejects a qualifier-only query —
+# the --author-date range counts as the search text, so keep it.)
+```
+
+> **Sprint filtering caveat.** `gh search --project` returns items *currently on the
+> board*, not "the last N sprints" — the board's iteration/Sprint field is only
+> readable with the `read:project` scope (`gh auth refresh -s read:project`, then a
+> GraphQL `projectV2` iterations query). Without it, treat current board membership
+> as the active-sprint proxy and **say so in the report**. Don't fabricate a
+> per-sprint split you can't read.
 
 Derive:
 - **Abandoned PRs this week** = closed-this-week set **minus** merged-this-week set
@@ -171,6 +211,13 @@ Grounded in Kanban flow metrics, DORA, and engineering-management practice:
 
 ## Step 4 — write the report
 
+**Presentation: KPI tables.** Present every section as a **table** (scannable rows,
+one item per row with its key columns) — *except the final "Actionable
+opportunities"*, which reads better as a prioritized list. Tables make the report
+skimmable for a management update. Use the emoji **⚠️** (with the variation
+selector) and **✅/🔴**, not bare `⚠`/`✓` — bare glyphs render inconsistently in
+terminals.
+
 Organize the evidence toward the four purposes. A workable layout:
 
 1. **Headline** — one line: `<org> · <SINCE>..<UNTIL> — <N> shipped, <O> in flight,
@@ -178,8 +225,8 @@ Organize the evidence toward the four purposes. A workable layout:
 2. **Shipped (planned work done) + quality** — merged PRs / closed issues grouped
    by repo or theme. **Each line names the author and the fully-qualified
    `owner/repo#n`** (management asks "who shipped what" — never drop attribution or
-   the repo), plus the subagent's `one_line` and a quality tag (✓ done &
-   release-ready / ⚠ carries follow-up debt — name the debt). This is the "what got
+   the repo), plus the subagent's `one_line` and a quality tag (✅ done &
+   release-ready / ⚠️ carries follow-up debt — name the debt). This is the "what got
    delivered, by whom, and is it solid" the management update leads with.
 3. **In flight + when it lands** — open PRs/active issues with progress
    (`≈4 of 6 criteria, inferred`), **Work Item Age**, and the **honest ETA**
