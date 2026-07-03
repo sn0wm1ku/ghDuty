@@ -147,12 +147,21 @@ fi
 # the --author-date range counts as the search text, so keep it.)
 ```
 
-> **Sprint filtering caveat.** `gh search --project` returns items *currently on the
-> board*, not "the last N sprints" — the board's iteration/Sprint field is only
-> readable with the `read:project` scope (`gh auth refresh -s read:project`, then a
-> GraphQL `projectV2` iterations query). Without it, treat current board membership
-> as the active-sprint proxy and **say so in the report**. Don't fabricate a
-> per-sprint split you can't read.
+> **Sprint filtering.** The Projects v2 API has **no distinct/group-by/aggregate and
+> no server-side iteration filter** — you must enumerate items and dedupe locally.
+> The clean way is `gh project item-list` (it handles pagination in one call; needs
+> the `read:project` scope — `gh auth refresh -h github.com -s read:project`):
+> ```bash
+> # recent-5 sprint titles from the iteration field, then distinct repos in them:
+> gh project item-list <n> --owner <org> -L 1000 --format json \
+>   | jq -r --argjson t '["sprint 69","sprint 70","sprint 71","sprint 72","sprint 73"]' \
+>       '.items[]|select((.sprint.title//"") as $s|$t|index($s))|.content.repository//empty' | sort -u
+> ```
+> (Get the recent-5 titles by sorting the iteration field's `iterations+completedIterations`
+> by `startDate`.) **Without `read:project`**, fall back to `gh search --project
+> <org>/<n>` — which returns items *currently on the board* (no per-sprint slice) — and
+> **say in the report** that it's a current-board approximation, not a true 5-sprint cut.
+> Don't hand-roll paginated GraphQL loops (slow, times out) when `item-list` does it.
 
 Derive:
 - **Abandoned PRs this week** = closed-this-week set **minus** merged-this-week set
