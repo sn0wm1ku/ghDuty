@@ -137,7 +137,14 @@ file (`agents/schedule-planner.md`) carries the full method; the essentials:
 
 Each returns the structured JSON in the persona spec (objective + source, progress
 criteria, Work Item Age, ETA, satisfies-objective, release-ready, follow-up debt,
-`one_line`). The orchestrator collects these for Step 4.
+`one_line`, plus `implication` + `suggested_action`). The orchestrator collects
+these for Step 4.
+
+**Validate each result; retry once if malformed.** A subagent occasionally returns
+prose, a raw `/code-review` findings array, or an empty/near-instant result instead
+of the JSON verdict. If a result isn't the expected object, **re-launch that one PR's
+subagent once** before giving up; if it still fails, list the PR as `unanalyzed` in
+the report rather than dropping it silently.
 
 ## Metric discipline (non-negotiable — read before writing Step 4)
 
@@ -169,24 +176,42 @@ Organize the evidence toward the four purposes. A workable layout:
 1. **Headline** — one line: `<org> · <SINCE>..<UNTIL> — <N> shipped, <O> in flight,
    <A> abandoned, <B> pending; <K> people active`.
 2. **Shipped (planned work done) + quality** — merged PRs / closed issues grouped
-   by repo or theme, each with the subagent's `one_line` and a quality tag
-   (✓ done & release-ready / ⚠ carries follow-up debt — name the debt). This is the
-   "what got delivered and is it solid" the management update leads with.
+   by repo or theme. **Each line names the author and the fully-qualified
+   `owner/repo#n`** (management asks "who shipped what" — never drop attribution or
+   the repo), plus the subagent's `one_line` and a quality tag (✓ done &
+   release-ready / ⚠ carries follow-up debt — name the debt). This is the "what got
+   delivered, by whom, and is it solid" the management update leads with.
 3. **In flight + when it lands** — open PRs/active issues with progress
    (`≈4 of 6 criteria, inferred`), **Work Item Age**, and the **honest ETA**
    (milestone / throughput-range / none). Flag **stalled** items (old Work Item Age,
    little progress).
 4. **Abandoned / at risk** — PRs closed unmerged this week, plus open items that are
    dead-stale (high Work Item Age, no recent activity) and *not* deliberately parked.
-5. **Pending backlog** — open issues classified: **active-assigned** (owned, moving),
-   **active-unassigned** (open work with no owner — a coordination risk to flag),
-   **iceboxed** (deliberately parked: a parked label — `icebox`/`backlog`/`on-hold`/
-   `blocked`/`wontfix`/`someday`/`deferred`, case-insensitive — or no update in 90+
-   days).
+5. **Pending backlog** — open issues classified, **broken down per repo with the
+   notable items named** (`owner/repo#n title`), not just totals — a bare "110 open
+   issues" tells the reader nothing they can act on. Classify each: **active-assigned**
+   (owned, moving), **active-unassigned** (open work with no owner — a coordination
+   risk to flag), **iceboxed** (deliberately parked: a parked label —
+   `icebox`/`backlog`/`on-hold`/`blocked`/`wontfix`/`someday`/`deferred`,
+   case-insensitive — or no update in 90+ days). Show the per-repo counts AND list
+   the active-unassigned ones by name (they're the actionable risk); the top repos by
+   backlog size are where to look first.
    <!-- ponytail: label-set + 90d staleness are tunable defaults; make them config if a repo's conventions differ -->
-6. **Per-repo activity** — commits-by-contributor tally and WIP/throughput per repo,
-   framed per the metric discipline (coordination context, **not** a ranking).
-7. **What the team needs (assistance)** — synthesize from the signals, and for each
+6. **Automation / bot PRs** — bot-authored open PRs (`github-actions[bot]`,
+   `dependabot[bot]`, etc.) are **separated out from human WIP** so they don't inflate
+   the WIP number, but **characterize them, don't just count** — say what they are
+   (release-candidate PRs, dependency bumps, auto-scaffold-on-assign tracking PRs) and
+   how many are stale (>90d), per repo. A pile of stale auto-PRs is itself an
+   actionable finding (automation cleanup), not noise to hand-wave.
+7. **Per-repo activity — who worked where** — for each repo with activity this week,
+   a **per-contributor breakdown**: who committed to it (commit count) and who
+   merged/closed PRs in it (with the `owner/repo#n`). Present it as a repo →
+   contributor view so the reader can see, e.g. "`jtb-internal-chatbot`: RedEffandy —
+   6 merged PRs (#4/#6/#10/#11/#13/#17), 39 commits; sn0wm1ku — 1 merged (#18)". This
+   is the detail behind the headline — who is carrying which repo. Frame per the
+   metric discipline: it shows **where effort landed and concentration/bus-factor
+   risk (one person carrying a repo)**, *not* a productivity ranking of people.
+8. **What the team needs (assistance)** — synthesize from the signals, and for each
    one **explain it for a non-manager**: the signal, what it means, and what a lead
    usually does. Common patterns and the standard leader response:
    - *Active work with no assignee* → nobody owns it; work with no owner tends to
@@ -200,12 +225,17 @@ Organize the evidence toward the four purposes. A workable layout:
      person. **Do:** pair someone in / spread reviews.
    - *Follow-up debt piling up* (deferred tests/refactors from merged work) → quietly
      slows future work. **Do:** schedule it as real backlog items now.
-8. **Actionable opportunities** — the payoff. A short, **prioritized** list of
+9. **Actionable opportunities** — the payoff. A short, **prioritized** list of
    concrete next actions, each written so an inexperienced lead can just do it:
-   *what to do, which item (#link), why it matters, and — where relevant — a
-   one-sentence talking point for management* (e.g. "We shipped X and Y this week;
-   Z is ~1–2 weeks out; our main risk is three unowned tasks I'm assigning
-   Monday."). Rank by impact. End here — this is what the reader acts on.
+   *what to do, which item (as a fully-qualified `owner/repo#n` — never a bare `#n`),
+   why it matters, and — where relevant — a one-sentence talking point for
+   management* (e.g. "We shipped X and Y this week; Z is ~1–2 weeks out; our main
+   risk is three unowned tasks I'm assigning Monday."). Rank by impact. End here —
+   this is what the reader acts on.
+
+**Fully-qualified references, everywhere.** Every PR/issue mention in the whole
+report is `owner/repo#n`, never a bare `#n` — the report spans many repos, so a bare
+number is ambiguous and not clickable.
 
 Every claim traces to a diff, issue criterion, PR, commit, or flow metric in the
 data — no speculation beyond what the evidence shows. And every finding a

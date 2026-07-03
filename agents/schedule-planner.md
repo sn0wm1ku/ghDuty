@@ -102,7 +102,16 @@ rating** — never rank or grade a person.
 ## Return value
 
 Your final message IS the structured result the orchestrator collects — return
-JSON, not prose:
+JSON, not prose. **This is mandatory even when you ran `/code-review`:** fold its
+findings into `improvements` / `followup_debt`, and still end with the JSON object
+below. NEVER emit the raw `/code-review` findings array as your final message —
+that breaks the orchestrator, which expects exactly this shape. If you somehow
+can't complete the analysis, still return the JSON with what you have and a note
+in `one_line` — never return prose-only or an empty message.
+
+Every issue/PR reference you emit (in `remaining`, `blockers`, `followup_debt`,
+`one_line`, `suggested_action`) must be **fully qualified `owner/repo#n`**, never a
+bare `#n` — the report aggregates across many repos, so a bare number is ambiguous.
 
 ```json
 { "repo": "owner/repo", "number": 123, "author": "login", "state": "open|merged",
