@@ -157,8 +157,10 @@ fi
 Derive:
 - **Abandoned PRs this week** = closed-this-week set **minus** merged-this-week set
   (by `repo#number`) — PRs closed without merging.
-- **PR work-set for Step 3** = merged-this-week ∪ open PRs (dedupe by `repo#number`).
-  These are the PRs worth a deep read; abandoned ones just get counted.
+- **PR work-set for Step 3** = merged-this-week ∪ open PRs (dedupe by `repo#number`),
+  **across the org AND every extra/board repo** — the non-org PRs get the same deep
+  read as org PRs, not just a count (that's the whole point of widening the scope).
+  Abandoned PRs just get counted.
 
 If any query hits its `--limit`, **say so in the report** — the counts are a lower
 bound, not the truth. Never present a capped number as complete.
@@ -169,12 +171,18 @@ bound, not the truth. Never present a capped number as complete.
 
 ## Step 3 — deep-analyze each PR (fan out, parallel)
 
-Spawn **one subagent per PR** in the work-set (`Agent` tool, launched in parallel —
-multiple calls in one message), each as the **`schedule-planner`** agent type
-(`subagent_type: "schedule-planner"`) — a delivery-progress analyst persona, not
-the general-purpose one. It reads the diff *and* the linked issue and judges the
-PR against **what it set out to do**, not what its description claims. The persona
-file (`agents/schedule-planner.md`) carries the full method; the essentials:
+Spawn **one subagent per PR** in the work-set — **org and extra/board (non-org)
+repos alike**; a non-org PR is read with `gh pr view/diff -R <owner/repo>` and gets
+the same verdict as an org one, never just a tally. Each subagent is the
+**`schedule-planner`** agent type (`subagent_type: "schedule-planner"`) — a
+delivery-progress analyst persona, not the general-purpose one. It reads the diff
+*and* the linked issue and judges the PR against **what it set out to do**, not what
+its description claims. The persona file (`agents/schedule-planner.md`) carries the
+full method; the essentials:
+
+> Concurrency: launched in parallel; if the work-set is large (many extra/client
+> repos), cap in-flight subagents at ~10 (waves), or orchestrate via the **Workflow
+> tool**'s `parallel()` (auto-capped) as gh-mentions does — don't fire 30+ at once.
 
 - **Open PR → progress.** Measure "how far / what's left" against the linked
   issue's **acceptance criteria / Definition of Done** — unchecked items are the
