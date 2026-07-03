@@ -303,7 +303,22 @@ Opt-in, fires only when `GHDUTY_SLACK_WEBHOOK` is set (see README "Slack setup")
 and this run created ≥1 ticket. Notify from the subagents' `ticketed` results —
 list each ticket with its repo, source issue, and the **branch that was pushed**,
 so you can `/drive` it. The webhook posts as its own app, so you actually get
-notified:
+notified.
+
+**Canonical message format — use this exact shape every run** (Slack mrkdwn: `*bold*`,
+backticked branch, one block per ticket). Don't improvise a different layout — a
+consistent format is how the reader recognizes it:
+
+```
+:ticket: *ghDuty — <N> ticket(s) created*
+• *<owner/repo>#<n>* — <short issue/PR title>
+  branch `<branch>` · run `/drive` to implement
+• *<owner/repo>#<n>* — <short issue/PR title>
+  branch `<branch>` · run `/drive` to implement
+```
+
+Optionally follow with a one-line run tally (`_also: N reviewed, M acked, K replied;
+X already-signed, …_`). Build `$MSG` in that shape, then POST:
 
 ```bash
 if [ -n "$GHDUTY_SLACK_WEBHOOK" ]; then   # and ≥1 ticket created
