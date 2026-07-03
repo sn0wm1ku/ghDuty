@@ -227,12 +227,15 @@ Grounded in Kanban flow metrics, DORA, and engineering-management practice:
 
 ## Step 4 — write the report
 
-**Presentation: KPI tables.** Present every section as a **table** (scannable rows,
-one item per row with its key columns) — *except the final "Actionable
-opportunities"*, which reads better as a prioritized list. Tables make the report
-skimmable for a management update. Use the emoji **⚠️** (with the variation
-selector) and **✅/🔴**, not bare `⚠`/`✓` — bare glyphs render inconsistently in
-terminals.
+**Presentation: KPI tables — item-by-item, NEVER compressed.** Present every section
+as a **table** — *except the final "Actionable opportunities"* (a prioritized list).
+**One row per item. Do NOT collapse multiple items into one row or cell** — never
+`#6/#10/#4` on one line, never `corporate 39 · huca 17` mashed together, never a bare
+count standing in for the items. Each PR / issue / repo gets its **own row** with its
+fully-qualified `owner/repo#n`. **At minimum group by repo** (rows for the same repo
+adjacent, optionally a repo sub-header); item-by-item is the target. A collapsed tally
+hides exactly what the reader needs to act on. Use **⚠️** (variation selector) and
+**✅/🔴**, not bare `⚠`/`✓` (bare glyphs render inconsistently in terminals).
 
 Organize the evidence toward the four purposes. A workable layout:
 
