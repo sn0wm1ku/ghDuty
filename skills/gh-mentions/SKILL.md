@@ -38,12 +38,22 @@ re-read, never a wrong action.
 
 - **`GHDUTY_WORK_DIR`** — the working folder where repos are cloned (below).
 - **`GHDUTY_SLACK_WEBHOOK`** — optional Slack callback for ticket notifications
-  (Step 5); unset = Slack silently skipped. **When it IS set, tell the user (at
-  this bootstrap) that they must also grant the webhook POST an `autoMode.allow`
-  entry** (see README "Slack setup") — with `defaultMode: auto`, Claude Code's
-  classifier blocks external writes by default, so without the grant the Step 5
-  Slack ping is denied even though the webhook is configured. The agent can't
-  self-grant it (self-modification guard); surface it so the user adds it once.
+  (Step 5); unset = Slack silently skipped. **First-run permission gate — when it
+  IS set, actively check the user has granted the webhook POST**, because with
+  `defaultMode: auto` Claude Code's classifier blocks external writes and the agent
+  **cannot self-grant** (self-modification guard). Check whether the grant is
+  already present:
+
+  ```bash
+  grep -rqs 'ghduty.*Slack\|Slack.*webhook.*ghduty\|hooks.slack.com' \
+    ~/.claude/settings.json ~/.claude/settings.local.json 2>/dev/null \
+    && echo "slack grant: present" || echo "slack grant: MISSING — prompt user"
+  ```
+
+  If MISSING, **`AskUserQuestion`** the user to add the one-time `autoMode.allow`
+  grant (exact snippet in README "Slack setup") before the run — they paste it into
+  settings, or accept that Step 5 will be blocked and they'll send it themselves.
+  Don't silently proceed to a Step 5 that will just get denied.
 - **skip-ledger** — a **cache** (not config): a directory
   `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger/` with **one file per
   thread**, `<owner>__<repo>__<n>.json` holding `{"updatedAt": "…"}`. One file per
@@ -142,9 +152,24 @@ the parallel stage. This is what stops "considered, no action" items from being
 re-read every run; the signature (remote) still covers items you *did* act on.
 
 ```bash
-LED="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"; mkdir -p "$LED"
+DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}"; LED="$DIR/skip-ledger"; mkdir -p "$LED"
 key(){ echo "$LED/$(echo "$1" | tr '/#' '__').json"; }   # owner/repo#n -> file
+# ONE-TIME MIGRATION: an older ghDuty used a single-file ledger (skip-ledger.jsonl).
+# Fold it into per-key files so its entries are still honored, then retire it —
+# otherwise the format change silently orphans every previously-ledgered item.
+if [ -f "$DIR/skip-ledger.jsonl" ]; then
+  jq -c '.' "$DIR/skip-ledger.jsonl" | while IFS= read -r l; do
+    r=$(echo "$l" | jq -r '.repo'); n=$(echo "$l" | jq -r '.number')
+    [ -n "$r" ] && [ "$r" != null ] && echo "$l" > "$(key "$r#$n")"
+  done
+  mv "$DIR/skip-ledger.jsonl" "$DIR/skip-ledger.jsonl.migrated"
+fi
 ```
+
+**The ledger fast-skip is MANDATORY every run — never bypass it.** (A hand-authored
+run that skips it re-processes everything the last run judged "no action", which is
+how already-ledgered items like stale `tabisugo` tickets get re-created. Run the
+skill's flow; don't improvise a fan-out that drops this step.)
 
 ### What each per-item subagent does
 
@@ -187,7 +212,7 @@ its subtype. An item can be in more than one query; do all that apply.
 | **assigned ISSUE with a linked PR** (the osbr repos auto-open a PR when you're assigned; you're already assigned on that PR) | Leave an **acknowledgment comment** on the issue: `Acknowledged <UTC date time>.` (signed). The linked PR is handled by the assigned-PR rule below. |
 | **assigned ISSUE with no PR** (usually an idea/discussion — still needs a response) | Open a **ticket** in the repo's clone, **create + push a new branch** for the ticket, then **Slack** to drive it (Step 5). |
 | **assigned PR** | **Closed → skip.** **Open → gap-fill:** read the PR diff *and its linked issue* — the objective/to-do usually lives in the issue, not the PR. Identify what the issue asks that the PR hasn't done yet, and open a **ticket** (clone + pushed branch + Slack, same as an idea-issue) describing the gap to fill. **If the work is already fully shipped / no gap remains, don't ticket** — leave a signed comment stating it looks shipped (cite the evidence) and **suggesting the issue/PR be closed**. |
-| **review-requested**, or a comment asking for review | Run `/code-review` on that PR, post the findings as a reply. |
+| **review-requested**, or a comment asking for review | Run `/code-review` on that PR and post the findings as a reply. **If the verdict is LGTM (no blocking findings), also submit an actual PR approval** — `mcp__plugin_github_github__pull_request_review_write` (method `create`, event `APPROVE`) — not just a comment; a requested review isn't cleared until it's approved (or changes requested). If there ARE blocking findings, request changes / comment instead of approving. |
 | **mentioned**, and the mention asks something | Reply — answer a question, or ticket + reply if it's a change request. **Skip if the mentioning comment itself is >2 years old** (judge by the comment's `created_at`, not the issue's; a stale @ isn't worth answering). |
 | Genuinely nothing to do (pure FYI, an ack, already resolved) | Skip. |
 
