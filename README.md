@@ -8,7 +8,7 @@ state across all repos and, in parallel:
 - **Assigned issue with no PR** (an idea/discussion) → opens a `/ticket` (from [workaholic](https://github.com/qmu/workaholic)) in the target repo's clone, **pushes a ticket branch**, and Slacks you to `/drive` it.
 - **Assigned PR** → closed: skipped; open: reads the PR **and its linked issue** (the objective/to-do usually lives in the issue, not the PR), finds the gap, and opens a ticket to fill it (ack comment instead if the PR already satisfies the issue).
 - **Mentions you** → replies to every one, unless the mentioning *comment* is >2 years old (judged by the comment's date, not the issue's).
-- **Review requested** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR.
+- **Review requested** → runs `/code-review` (from [code-review](https://github.com/anthropics/claude-plugins-official)) against the PR; on an LGTM / no-blocking verdict it submits an actual PR **approval** (not just a comment), otherwise it posts the findings.
 - **Tickets created this run** → optionally pings you on Slack (with the pushed branch).
 
 GitHub is the record — every open assigned/mentioned/review item counts,
@@ -127,13 +127,21 @@ or on a schedule so your inbox gets worked unattended (Claude Code
 the skill).
 
 Every run builds your queue (assigned + mentioned + review-requested, open) and
-**handles the items in parallel — one subagent per item**: assigned → ticket for
-`/drive`, mention → reply, review → `/code-review`. No first-run gate and no
-checkbox — every run handles every item that isn't already signed or filtered
-out. It's idempotent by the **signed comment in each thread**: any item ghDuty
-already acted on carries a signature (ack, reply, review, or ticket-notice), so
-it's skipped until someone replies after it. It acts only on repos you own or
-collaborate on.
+**handles the items in parallel — one agent per item** via a **committed workflow
+script** (`workflows/gh-mentions.js`, run with the Workflow tool, concurrency
+auto-capped ~`min(16, cores−2)`): assigned → ticket for `/drive`, mention → reply,
+review → `/code-review` (+ approve on LGTM). The whole orchestration —
+discover + dedupe + ledger fast-skip + per-item handling + Slack notify — lives in
+that one script so it runs the same every time and no step is dropped (it is *not*
+re-improvised per run). No first-run gate and no checkbox — every run handles every
+item that isn't already signed or filtered out. It's idempotent by the **signed
+comment in each thread**: any item ghDuty already acted on carries a signature (ack,
+reply, review, or ticket-notice), so it's skipped until someone replies after it. It
+acts only on repos you own or collaborate on.
+
+When a run creates tickets and Slack is configured, the notification lists **every
+handled item, item-by-item (never a collapsed tally), each a clickable link** to its
+issue/PR, grouped by action.
 
 Every comment it posts ends with a signature — `🤖 auto-posted by sn0wm1ku/ghDuty
 · co-authored by Claude (<model>)` — crediting the plugin and the Claude model
@@ -221,9 +229,13 @@ work). Two records, by outcome:
   Remote, durable — this is the correctness record. Before acting, a subagent
   checks whether a ghDuty comment is already there with nothing newer, and skips.
 - **Considered but no action needed** (a bare FYI, an ack, a resolved thread) →
-  an entry in a local **skip-ledger** (`${CLAUDE_PLUGIN_DATA}/skip-ledger.jsonl`)
-  keyed by the thread's `updatedAt`, so it isn't re-read every run. It's a pure
-  optimization cache — delete it and you just re-read those threads once.
+  a per-thread file in the local **skip-ledger** directory
+  (`${CLAUDE_PLUGIN_DATA}/skip-ledger/<owner>__<repo>__<n>.json`) holding the
+  thread's `updatedAt`, so it isn't re-read every run. One file per key means the
+  parallel workers each write only their own (no shared-file race, no lock), and
+  it's self-compacting. It's a pure optimization cache — delete it and you just
+  re-read those threads once. (A legacy single-file `skip-ledger.jsonl` is migrated
+  into this directory automatically on first run so nothing already ledgered is lost.)
 
 New activity after either marker (a reply after our comment, or a bumped
 `updatedAt` past the ledger entry) makes the item actionable again — exactly when
