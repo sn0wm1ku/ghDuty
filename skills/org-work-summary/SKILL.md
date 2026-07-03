@@ -1,16 +1,44 @@
 ---
 name: org-work-summary
-description: 'Summarize a GitHub org''s work for the current week (last Saturday through today), across all repos: what shipped, how far in-flight work has progressed, and who contributed. Pulls org-wide search state (merged/opened PRs, closed/opened issues, commits) scoped to the week, then fans out one read-only subagent per PR to read its DIFF and linked issue — for open PRs it gauges progress against the objective (how much implemented, how far to go), for merged PRs it judges quality (what was done well, room for improvement). Also gives a per-repo issue status (completed this week vs pending — pending split into active-assigned, active-unassigned, iceboxed) and per-repo commit counts grouped by contributor. Writes a themed summary plus a per-contributor breakdown. Use when the user says "org weekly summary", "what did the org ship this week", "how far along is our work", "who worked on what this week", or runs it on a Friday schedule.'
+description: 'Turn a GitHub org''s current-week activity into material a lead can take to upper management: what shipped and its quality, how far in-flight work has progressed and when it will land, what''s stalled or abandoned, and — the point of the report — where the team needs help and what actionable opportunities to pursue next. Pulls org-wide search state (merged/open PRs, opened/closed issues, commits) for the week (last Saturday→today), fans out one read-only schedule-planner subagent per PR to judge it against its linked issue (progress by acceptance criteria for open PRs, objective-satisfaction + done-ness for merged PRs, code review delegated to /code-review), reasons about delivery with Kanban flow metrics (WIP, throughput, Work Item Age) not raw counts, and treats every metric as a team-level signal never an individual rating. Use when the user says "org weekly summary", "what did the team ship this week", "how far along is our work", "prep for my management update", or runs it on a Friday schedule.'
 ---
 
 # Org weekly work summary
 
 A read-only reporting agent. Given a GitHub org, it collects **this week's**
-activity across every repo in the org and writes a summary of the work done and
-who contributed. No writes, no tickets, no comments — just a report.
+activity across every repo and writes a delivery report. No writes, no tickets,
+no comments — just a report.
 
-"This week" = **last Saturday through today** (the week is assumed to end on a
-Friday; the range is computed, not hard-coded).
+## Purpose (this drives every choice below)
+
+The report exists to:
+
+1. **Give a lead material to talk to upper management** — concrete, defensible,
+   presentable.
+2. **Grasp the team's real progress** — what shipped, how far in-flight work is,
+   what's stuck.
+3. **Surface what assistance the team needs** — where it's blocked, under-owned,
+   overloaded, or accumulating debt.
+4. **Discover actionable opportunities** — the report ends with concrete next
+   actions, not just a description of the week.
+
+**Write for a reader who is NOT an experienced manager.** Assume the reader does
+not know what a leader is "supposed" to do with this data. So the report never
+just presents a number and stops — for every signal it (a) says **what it means**
+in one plain sentence, (b) says **what a lead typically does** about it, and
+(c) where useful, gives a **ready-to-use talking point** for the management
+conversation. Briefly define any metric term inline the first time (e.g. "WIP =
+items started but not finished"). The report should be able to stand in for the
+leadership experience the reader doesn't yet have.
+
+The section layout below is **one way to organize the evidence toward those
+goals, not a rigid schema** — reorganize, merge, or drop sections to serve the
+purpose. What is *not* negotiable is the **metric discipline** (grounded in Kanban
+flow metrics, DORA, and engineering-management practice) that keeps the report
+honest — see "Metric discipline" before writing.
+
+"This week" = **last Saturday through today** (assumed to end on a Friday; the
+range is computed, not hard-coded).
 
 ## Prerequisite
 
@@ -19,8 +47,6 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 ```
 
 ## Step 0 — bootstrap (config only)
-
-One piece of configuration: **which org**.
 
 - **`GHDUTY_ORG`** — the GitHub org login to summarize. If unset, **ask the user**
   (`AskUserQuestion`) and tell them to persist it in their
@@ -33,9 +59,6 @@ One piece of configuration: **which org**.
 
 ## Step 1 — compute the week window
 
-Today is assumed to be **Friday**; the week runs from the most recent Saturday
-through today (inclusive). Compute it, don't hard-code — it works any day:
-
 ```bash
 # BSD date (macOS). GNU date: SINCE=$(date -d "last saturday" +%F) or -d "$OFF days ago".
 DOW=$(date +%u)                 # 1=Mon .. 7=Sun
@@ -47,152 +70,159 @@ echo "week: $SINCE .. $UNTIL"
 
 ## Step 2 — collect the org's activity (durable org-wide search)
 
-Each query is scoped by `--owner=$GHDUTY_ORG` and the week window, so one query
-covers **every repo in the org**. Merged PRs and closed issues are the "work
-done" signal; opened PRs/issues are in-flight context; commits catch work that
-didn't route through a PR.
+Each query is scoped by `--owner=$GHDUTY_ORG`, so one query covers **every repo in
+the org**. The week-scoped queries give this week's *throughput* (finished work);
+the open-state queries give current *WIP* (work in progress) — both are needed to
+reason about flow (Step 3 forecasting, Step 4 metrics).
 
 ```bash
-# PRs merged this week — the primary "shipped" signal
+# THROUGHPUT — finished this week
+# PRs merged this week (the primary "shipped" signal)
 gh search prs --owner="$GHDUTY_ORG" --merged --merged-at="$SINCE..$UNTIL" --limit 100 \
-  --json repository,number,title,author,url,closedAt   # closedAt == merge time for a merged PR
-# PRs opened this week (in-flight)
-gh search prs --owner="$GHDUTY_ORG" --created="$SINCE..$UNTIL" --limit 100 \
-  --json repository,number,title,author,url,state,createdAt
+  --json repository,number,title,author,url,closedAt   # closedAt == merge time
+# PRs closed this week (merged OR abandoned) — subtract the merged set to get abandoned
+gh search prs --owner="$GHDUTY_ORG" --state=closed --closed="$SINCE..$UNTIL" --limit 100 \
+  --json repository,number,title,author,url,closedAt
 # issues closed this week
 gh search issues --owner="$GHDUTY_ORG" --closed="$SINCE..$UNTIL" --limit 100 \
   --json repository,number,title,author,url,closedAt
-# issues opened this week
-gh search issues --owner="$GHDUTY_ORG" --created="$SINCE..$UNTIL" --limit 100 \
-  --json repository,number,title,author,url,createdAt
-# commits authored this week (catches work outside PRs)
+# commits authored this week (work outside PRs)
 gh search commits --owner="$GHDUTY_ORG" --author-date="$SINCE..$UNTIL" --limit 100 \
   --json repository,author,commit,sha,url
-# ALL open issues in the org (NOT week-scoped) — the current pending backlog, for
-# the per-repo status breakdown in Step 4. --include-prs is omitted so PRs don't count.
+
+# WIP — currently open (NOT week-scoped: in-flight work started earlier still counts)
+# all open PRs — the active delivery pipeline; createdAt is the Work Item Age proxy
+gh search prs --owner="$GHDUTY_ORG" --state=open --limit 200 \
+  --json repository,number,title,author,url,createdAt,updatedAt,assignees,isDraft
+# all open issues — the pending backlog
 gh search issues --owner="$GHDUTY_ORG" --state=open --limit 200 \
-  --json repository,number,title,url,assignees,labels,updatedAt
+  --json repository,number,title,url,assignees,labels,createdAt,updatedAt
 ```
 
-If any query hits the 100-item `--limit`, note in the report that results were
-capped for that category (the org was busier than one page) — don't silently
-undercount.
+Derive:
+- **Abandoned PRs this week** = closed-this-week set **minus** merged-this-week set
+  (by `repo#number`) — PRs closed without merging.
+- **PR work-set for Step 3** = merged-this-week ∪ open PRs (dedupe by `repo#number`).
+  These are the PRs worth a deep read; abandoned ones just get counted.
 
-Dedupe PRs across the merged and opened queries by `repo#number` into one PR
-work-set (a PR can be both opened and merged this week). This set is the input to
-the deep analysis in Step 3. Issues and commits feed the contributor stats
-directly — they don't need deep analysis.
+If any query hits its `--limit`, **say so in the report** — the counts are a lower
+bound, not the truth. Never present a capped number as complete.
+
+> Note: `gh search` JSON can't cheaply tell a "completed" issue from one closed as
+> *not planned*, so treat closed issues as completed unless a subagent read reveals
+> otherwise, and say the abandoned-issue count is PR-based + best-effort.
 
 ## Step 3 — deep-analyze each PR (fan out, parallel)
 
-Titles and descriptions lie or omit; the **diff** is the ground truth. Spawn
-**one subagent per PR** in the work-set (`Agent` tool, launched in parallel —
+Spawn **one subagent per PR** in the work-set (`Agent` tool, launched in parallel —
 multiple calls in one message), each as the **`schedule-planner`** agent type
 (`subagent_type: "schedule-planner"`) — a delivery-progress analyst persona, not
 the general-purpose one. It reads the diff *and* the linked issue and judges the
-PR against **what it set out to do**, not what its description claims.
+PR against **what it set out to do**, not what its description claims. The persona
+file (`agents/schedule-planner.md`) carries the full method; the essentials:
 
-For a **merged** PR's quality verdict, the schedule-planner delegates the actual
-code review to the **`/code-review` skill / code-reviewer expert** and folds those
-findings back into the objective/schedule view — the persona does not hand-roll a
-code review. Keep every subagent read-only (`gh` reads + `/code-review`, which
-also only reads — never a write). Each returns the structured verdict below.
+- **Open PR → progress.** Measure "how far / what's left" against the linked
+  issue's **acceptance criteria / Definition of Done** — unchecked items are the
+  remaining work. When no checklist exists, **infer** and clearly label it as
+  inferred (never a fabricated %). Staleness = **Work Item Age** (time since the PR
+  opened), not calendar age and not cycle time. Forecast a landing date honestly:
+  milestone if set, else a throughput-based range, else "no reliable estimate".
+- **Merged PR → quality.** Two axes: did it satisfy the objective, and is it truly
+  done (tested, release-ready)? Deferred tests/refactors → name them as **visible
+  follow-up debt** for the plan. For code-quality depth, the persona **delegates to
+  the `/code-review` skill / code-reviewer expert** and folds findings into plan
+  terms — it does not hand-roll a review.
+- **Never** judge progress or output by commit count / lines-of-code / diff size —
+  those are Goodhart-prone and penalize refactoring. Every subagent is read-only.
 
-### What each per-PR subagent does
+Each returns the structured JSON in the persona spec (objective + source, progress
+criteria, Work Item Age, ETA, satisfies-objective, release-ready, follow-up debt,
+`one_line`). The orchestrator collects these for Step 4.
 
-1. **Read the PR and its diff:**
-   ```bash
-   gh pr view <n> -R <owner/repo> \
-     --json number,title,state,body,author,additions,deletions,changedFiles,closingIssuesReferences,comments
-   gh pr diff <n> -R <owner/repo>          # the actual changes — the ground truth
-   ```
-2. **Find the objective.** The to-do usually lives in the **linked issue**, not
-   the PR. Take `closingIssuesReferences`; if empty, scan the PR body for
-   `Closes/Fixes/Resolves #<n>` and any task checklist (`- [ ]` / `- [x]`). Read
-   the linked issue for the real acceptance criteria:
-   ```bash
-   gh issue view <issue#> -R <owner/repo> --json title,body
-   ```
-3. **Judge by state:**
-   - **Open / not merged (incomplete)** → gauge **progress**. Break the objective
-     into concrete requirements (issue acceptance criteria + PR checklist items),
-     then check each against the diff: **implemented / partial / not started**.
-     Report a fraction (`4/6 done`), what's **left to go**, and any blockers or
-     TODO/`FIXME`/stub markers left in the diff.
-   - **Merged (complete)** → assess **quality** by running the **`/code-review`
-     skill** on the PR (the code-reviewer expert finds the correctness bugs,
-     missing tests, silent failures, etc. — don't hand-roll it). Fold its findings
-     into an objective-level verdict: what's **done well** and **room for
-     improvement** / follow-up debt for next week's plan. Ground every point in a
-     file/hunk from the diff or a code-review finding.
-4. **Return** `{repo, number, author, state, objective, verdict: progress|quality,
-   fraction_done?, remaining?, strengths?, improvements?, one_line}` — `one_line`
-   is a single-sentence takeaway for the summary.
+## Metric discipline (non-negotiable — read before writing Step 4)
 
-Keep each verdict evidence-bound: cite the file/line or issue criterion behind
-every claim. If a PR has **no** linked issue and an empty body, judge the diff on
-its own terms (what it changes, whether it looks coherent and complete) and say
-the objective was inferred from the diff.
+Grounded in Kanban flow metrics, DORA, and engineering-management practice:
 
-## Step 4 — synthesize the summary
+- **Flow, not volume.** Reason with **WIP** (open items = started-not-finished),
+  **Throughput** (items finished this week), and **Work Item Age** (age of open
+  items). By **Little's Law** (`Cycle Time ≈ WIP ÷ Throughput`) these are coupled —
+  rising WIP with flat throughput means longer completion times; that is a finding.
+- **Commit/PR/LOC counts are context, never a scoreboard.** Report the
+  per-contributor commit tally as *coordination* context (who touched what),
+  **explicitly not a productivity ranking**. LOC and commit counts are invalid
+  productivity measures (they penalize refactoring; LOC isn't comparable across
+  languages) — say so if anyone might read them that way.
+- **Team-level signals, never individual ratings.** Every metric is a cooperative
+  signal for improvement, never a target/OKR and never a person's performance
+  grade. Do not rank people.
+- **Both speed and stability.** If you characterize delivery health, pair
+  throughput with a stability read (reverts, reopened issues, follow-up-debt
+  volume) — not speed alone. Note that **merge ≠ deploy**, so any DORA-style read
+  is an approximation from PR/issue data; label it as such.
+- **No fabricated precision.** No made-up % done, no invented ETA. Ranges and
+  "unknown" are honest; false precision is a vanity metric.
 
-From the collected JSON (Step 2) and the per-PR verdicts (Step 3), write:
+## Step 4 — write the report
 
-1. **Headline** — `<org>: <N> PRs merged, <O> open/in-flight, <M> issues closed,
-   <K> contributors · <SINCE>..<UNTIL>`.
-2. **What shipped** — merged PRs grouped by repo or theme. One line each from the
-   subagent's `one_line`, tagged with a quality note (✓ solid / ⚠ has gaps) and
-   the top improvement when there is one.
-3. **In flight** — open PRs with their **progress** (`4/6 done — remaining: …`),
-   so the reader sees how far each is and what's left. Flag stalled ones (open,
-   little of the objective done).
-4. **Per-repo issue status** — for each repo with activity or open issues, a
-   compact breakdown:
-   - **Commits this week, by contributor** — from Step 2's commit query, group by
-     `repository` then by `author.login`, and show the count per person
-     (`alice ×12, bob ×3` — total 15). This is the per-repo commit tally the report
-     leads its contributor picture with. (Capped at the commit query's `--limit`;
-     if that cap was hit, say the counts are a lower bound.)
-   - **Completed this week** — issues closed this week (from Step 2's closed-issue
-     query, grouped by repo). List `#n title`.
-   - **Pending** — the repo's open issues (from the org-wide open-issues query),
-     classified into three buckets:
-     - **iceboxed** — parked / not being worked. An issue is iceboxed if it carries
-       a parked label (`icebox`, `backlog`, `on-hold`, `blocked`, `wontfix`,
-       `someday`, `deferred` — case-insensitive substring match) **or** hasn't been
-       updated in 90+ days (`updatedAt` older than `UNTIL − 90d`).
-       <!-- ponytail: label-set + 90d staleness heuristic; make the label list / window a config var if a repo's conventions differ -->
-     - **active assigned** — not iceboxed, has ≥1 `assignees` entry (someone owns it).
-     - **active unassigned** — not iceboxed, no assignee (open work with no owner —
-       worth flagging).
+Organize the evidence toward the four purposes. A workable layout:
 
-     Show counts per bucket and list the active ones (`#n title` + assignee for the
-     assigned bucket); iceboxed can be a count with the oldest few, since the point
-     is that they're parked.
-5. **Who contributed** — per-person breakdown keyed on `author.login` (union of PR
-   authors, issue authors, commit authors). For each: counts (merged / open /
-   issues closed / commits) and a one-line description of their main thread that
-   week, drawing on the PR verdicts. Sort by shipped volume.
+1. **Headline** — one line: `<org> · <SINCE>..<UNTIL> — <N> shipped, <O> in flight,
+   <A> abandoned, <B> pending; <K> people active`.
+2. **Shipped (planned work done) + quality** — merged PRs / closed issues grouped
+   by repo or theme, each with the subagent's `one_line` and a quality tag
+   (✓ done & release-ready / ⚠ carries follow-up debt — name the debt). This is the
+   "what got delivered and is it solid" the management update leads with.
+3. **In flight + when it lands** — open PRs/active issues with progress
+   (`≈4 of 6 criteria, inferred`), **Work Item Age**, and the **honest ETA**
+   (milestone / throughput-range / none). Flag **stalled** items (old Work Item Age,
+   little progress).
+4. **Abandoned / at risk** — PRs closed unmerged this week, plus open items that are
+   dead-stale (high Work Item Age, no recent activity) and *not* deliberately parked.
+5. **Pending backlog** — open issues classified: **active-assigned** (owned, moving),
+   **active-unassigned** (open work with no owner — a coordination risk to flag),
+   **iceboxed** (deliberately parked: a parked label — `icebox`/`backlog`/`on-hold`/
+   `blocked`/`wontfix`/`someday`/`deferred`, case-insensitive — or no update in 90+
+   days).
+   <!-- ponytail: label-set + 90d staleness are tunable defaults; make them config if a repo's conventions differ -->
+6. **Per-repo activity** — commits-by-contributor tally and WIP/throughput per repo,
+   framed per the metric discipline (coordination context, **not** a ranking).
+7. **What the team needs (assistance)** — synthesize from the signals, and for each
+   one **explain it for a non-manager**: the signal, what it means, and what a lead
+   usually does. Common patterns and the standard leader response:
+   - *Active work with no assignee* → nobody owns it; work with no owner tends to
+     stall. **Do:** assign an owner or drop it.
+   - *A PR open a long time with no review* → it's blocked waiting on people, not
+     code. **Do:** find a reviewer / raise it in standup.
+   - *WIP above ~team size* (WIP = items started-not-finished) → too many things
+     started at once, so everything finishes slower (Little's Law). **Do:** get the
+     team to finish before starting new work.
+   - *One person authoring most of a repo* → bus-factor risk; the team depends on one
+     person. **Do:** pair someone in / spread reviews.
+   - *Follow-up debt piling up* (deferred tests/refactors from merged work) → quietly
+     slows future work. **Do:** schedule it as real backlog items now.
+8. **Actionable opportunities** — the payoff. A short, **prioritized** list of
+   concrete next actions, each written so an inexperienced lead can just do it:
+   *what to do, which item (#link), why it matters, and — where relevant — a
+   one-sentence talking point for management* (e.g. "We shipped X and Y this week;
+   Z is ~1–2 weeks out; our main risk is three unowned tasks I'm assigning
+   Monday."). Rank by impact. End here — this is what the reader acts on.
 
-Every claim traces to a diff, issue criterion, PR, or commit in the data — no
-speculation beyond what the code shows.
+Every claim traces to a diff, issue criterion, PR, commit, or flow metric in the
+data — no speculation beyond what the evidence shows. And every finding a
+non-manager reads should leave them knowing what it means and what to do next.
 
 ## Notes
 
 - **Read-only.** Posts nothing, writes no local state — unlike `gh-mentions` there
-  is no signature or ledger, because there is no action to be idempotent about.
-  Re-running just re-reads the week.
+  is no signature or ledger; re-running just re-reads the week.
 - **Two granularities.** Org-wide `gh search` (Step 2) scopes the *list* in one
-  query per category — no per-repo fan-out for discovery. The *depth* (Step 3)
-  fans out one **`schedule-planner`** subagent per PR (a delivery-progress persona
-  shipped with this plugin, not general-purpose) to read its diff + linked issue;
-  a busy org may cap at `--limit`, surfaced in Step 2, and many PRs means many
-  subagents.
-- **Division of labor.** The schedule-planner owns *progress and schedule*
-  judgment. Actual code review stays with the `/code-review` skill and its expert
-  — the planner invokes it for merged-PR quality and translates the findings into
-  plan terms, rather than reviewing code itself.
-- The diff is the ground truth — a PR's own description is a claim, not a fact.
-  Progress and quality verdicts must cite the diff, not the description.
-- Date math is BSD `date` (macOS); the inline comment gives the GNU `date`
-  equivalent for Linux schedules.
+  query per category. The *depth* (Step 3) fans out one **`schedule-planner`**
+  subagent per PR (a delivery-progress persona shipped with this plugin, not
+  general-purpose); many PRs means many subagents, and a busy org may cap at
+  `--limit` (surfaced in Step 2).
+- **Division of labor.** The schedule-planner owns *progress, fit, and schedule*
+  judgment. Actual code review stays with `/code-review` and its expert.
+- **The report is diagnostic, not a scoreboard.** Its job is to inform planning and
+  surface where to help — metrics are team-level improvement signals, never
+  individual performance ratings (see Metric discipline).
+- Date math is BSD `date` (macOS); the inline comment gives the GNU equivalent.

@@ -65,29 +65,40 @@ Run it on demand:
 
 ### Org weekly summary
 
-A separate read-only skill, `/org-work-summary`, summarizes a whole org's work
-for **the current week** (last Saturday through today — the week is assumed to
-end on a Friday, but the range is computed so it works any day). It pulls
-org-wide search state (merged/opened PRs, closed/opened issues, commits) scoped
-to the week, then **reads each PR's diff and its linked issue** (not just the
-description) to judge it against what it set out to do:
+A separate read-only skill, `/org-work-summary`, turns a whole org's
+**current-week** activity (last Saturday through today — assumed to end on a
+Friday, but the range is computed so it works any day) into a delivery report
+built for four goals: **material to talk to upper management**, a real **grasp of
+team progress**, a read on **what help the team needs**, and — the payoff — a
+prioritized list of **actionable opportunities**.
 
-- **open PRs** → **progress**: which of the objective's requirements the diff
-  implements, a `done/total` fraction, and what's left to go;
-- **merged PRs** → **quality**: what was done well and any room for improvement,
-  each point cited to a hunk in the diff.
+It's **written for a reader who isn't an experienced manager**: every signal comes
+with what it *means* in plain words, what a lead typically *does* about it, and
+where useful a ready-to-use talking point for the management conversation.
+
+It pulls org-wide search state (merged/open PRs, opened/closed issues, commits)
+and **reads each PR's diff and its linked issue** (not just the description) to
+judge it against what it set out to do:
+
+- **open PRs** → **progress** by the linked issue's acceptance criteria (not a
+  made-up %), staleness by **Work Item Age**, and an **honest ETA** (milestone,
+  else a throughput-based range, else "no reliable estimate");
+- **merged PRs** → **quality**: did it meet the objective and is it truly done
+  (tested/release-ready), with deferred work surfaced as visible follow-up debt.
 
 The per-PR analysis runs as a dedicated **`schedule-planner`** agent persona
 (shipped with this plugin) — a delivery-progress analyst, not the general-purpose
-agent. It owns *progress and schedule* judgment; the actual code review for
-merged PRs is delegated to the `/code-review` skill and its expert, whose
-findings the planner folds into plan terms.
+agent, grounded in Kanban flow metrics / DORA / engineering-management practice.
+It owns *progress and schedule* judgment; the actual code review for merged PRs is
+delegated to the `/code-review` skill and its expert, whose findings it folds into
+plan terms.
 
-It then writes **what shipped**, **what's in flight (with progress)**, a
-**per-repo issue status** (completed this week vs pending — pending split into
-*active assigned*, *active unassigned*, and *iceboxed*), **per-repo commit counts
-grouped by contributor**, and a **per-contributor breakdown**. It posts nothing
-and keeps no state — just a report.
+The report covers **what shipped (and its quality)**, **what's in flight (with
+progress + ETA)**, **abandoned / at-risk** work, the **pending backlog** (active
+assigned / active unassigned / iceboxed), **per-repo activity**, **what the team
+needs**, and **actionable opportunities**. Every metric is treated as a
+team-level signal — never an individual performance ranking (no scoring by commit
+or line counts). It posts nothing and keeps no state — just a report.
 
 Set the org via `GHDUTY_ORG` in your settings `env` block (it asks if unset):
 
