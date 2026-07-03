@@ -38,7 +38,12 @@ re-read, never a wrong action.
 
 - **`GHDUTY_WORK_DIR`** — the working folder where repos are cloned (below).
 - **`GHDUTY_SLACK_WEBHOOK`** — optional Slack callback for ticket notifications
-  (Step 5); unset = Slack silently skipped.
+  (Step 5); unset = Slack silently skipped. **When it IS set, tell the user (at
+  this bootstrap) that they must also grant the webhook POST an `autoMode.allow`
+  entry** (see README "Slack setup") — with `defaultMode: auto`, Claude Code's
+  classifier blocks external writes by default, so without the grant the Step 5
+  Slack ping is denied even though the webhook is configured. The agent can't
+  self-grant it (self-modification guard); surface it so the user adds it once.
 - **skip-ledger** — a **cache** (not config): a directory
   `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger/` with **one file per
   thread**, `<owner>__<repo>__<n>.json` holding `{"updatedAt": "…"}`. One file per
@@ -307,7 +312,12 @@ if [ -n "$GHDUTY_SLACK_WEBHOOK" ]; then   # and ≥1 ticket created
 fi
 ```
 
-If unset or no ticket was created, skip silently.
+If unset or no ticket was created, skip silently. **If the POST is denied by the
+auto-mode classifier** (external-write block, when the user hasn't added the
+`autoMode.allow` grant from README "Slack setup"), don't treat it as failure of the
+run — the tickets are already filed. Report in Step 6 that the Slack ping was blocked
+for lack of the one-time grant, and print the ready-to-run `curl` (or the grant to
+add) so the user can finish it. Never silently drop it.
 
 ## Step 6 — report
 

@@ -186,6 +186,29 @@ To get a ping when a run **creates a ticket**:
    { "env": { "GHDUTY_SLACK_WEBHOOK": "https://hooks.slack.com/services/T.../B.../..." } }
    ```
 
+3. **Grant Claude Code permission to POST to your webhook.** This is the step
+   people miss: with `permissions.defaultMode: "auto"`, Claude Code's classifier
+   **blocks external writes by default** — so even though ghDuty is authorized by
+   *you* setting the webhook, the `curl` to Slack gets denied (a plain
+   `Bash(curl:*)` allow rule does **not** override the classifier). Add a scoped
+   `autoMode.allow` entry so the post is pre-authorized:
+
+   ```json
+   {
+     "autoMode": {
+       "allow": [
+         "$defaults",
+         "Posting to the ghDuty Slack incoming webhook (the hooks.slack.com URL in $GHDUTY_SLACK_WEBHOOK) is authorized — the ghduty plugin may curl POST run notifications to it."
+       ]
+     }
+   }
+   ```
+
+   Without this, the run still completes and files tickets — only the Slack ping is
+   blocked, and you'll have to send it yourself. (Claude Code intentionally won't let
+   the agent grant *itself* this permission — it's a self-modification guard — so
+   this one-time grant is yours to add when you configure the webhook.)
+
 If `GHDUTY_SLACK_WEBHOOK` is unset, the Slack step is skipped silently — the
 rest of the workflow works without any Slack config.
 
