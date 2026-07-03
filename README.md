@@ -69,8 +69,16 @@ A separate read-only skill, `/org-work-summary`, summarizes a whole org's work
 for **the current week** (last Saturday through today — the week is assumed to
 end on a Friday, but the range is computed so it works any day). It pulls
 org-wide search state (merged/opened PRs, closed/opened issues, commits) scoped
-to the week and writes **what shipped** plus a **per-contributor breakdown**. It
-posts nothing and keeps no state — just a report.
+to the week, then **reads each PR's diff and its linked issue** (not just the
+description) to judge it against what it set out to do:
+
+- **open PRs** → **progress**: which of the objective's requirements the diff
+  implements, a `done/total` fraction, and what's left to go;
+- **merged PRs** → **quality**: what was done well and any room for improvement,
+  each point cited to a hunk in the diff.
+
+It then writes **what shipped**, **what's in flight (with progress)**, and a
+**per-contributor breakdown**. It posts nothing and keeps no state — just a report.
 
 Set the org via `GHDUTY_ORG` in your settings `env` block (it asks if unset):
 
