@@ -62,12 +62,12 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
   stand in for "the active sprints".
 - **`GHDUTY_EXTRA_REPOS`** *(optional)* — comma-separated `owner/repo` list of extra
   repos to always include (incl. non-org), for teams without a board.
-- **plugin config file** — `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/config.json`,
-  the plugin's **own** config (not Claude's `settings.json`), holding `extra_repos`.
-  Managed by the **`manage-repos`** skill (`/manage-repos add owner/repo`) so users
-  don't hand-edit settings. Read as an addition to `GHDUTY_EXTRA_REPOS` (below). This
-  is durable config, kept separate from the append-only cache (gh-mentions'
-  `skip-ledger.jsonl`) — don't conflate the two.
+- **extra-repos list file** — `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/extra-repos.txt`,
+  one `owner/repo` per line (its own file — the list can grow large, e.g. every
+  client repo a team tracks). The plugin's **own** file, not Claude's `settings.json`;
+  managed by the **`manage-repos`** skill (`/manage-repos add owner/repo`). Read as an
+  addition to `GHDUTY_EXTRA_REPOS` (below). Kept separate from the gh-mentions cache
+  (`skip-ledger/`).
 
 ```bash
 [ -n "$GHDUTY_ORG" ] && echo "org: $GHDUTY_ORG" || echo "GHDUTY_ORG unset — ask the user"
@@ -125,8 +125,8 @@ is the **union** of three sources — the `GHDUTY_EXTRA_REPOS` env var, the
 `manage-repos` config file, and (if set) the `GHDUTY_PROJECT` board:
 
 ```bash
-CFG="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/config.json"
-{ echo "$GHDUTY_EXTRA_REPOS" | tr ',' '\n'; [ -f "$CFG" ] && jq -r '.extra_repos[]? // empty' "$CFG"; } \
+REPOS="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/extra-repos.txt"
+{ echo "$GHDUTY_EXTRA_REPOS" | tr ',' '\n'; [ -f "$REPOS" ] && grep -vE '^\s*#' "$REPOS"; } \
   | sed 's/^ *//;s/ *$//' | grep -E '^[^/ ]+/[^/ ]+$' | sort -u   # extra repos to include
 ```
 

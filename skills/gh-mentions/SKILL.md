@@ -39,9 +39,15 @@ re-read, never a wrong action.
 - **`GHDUTY_WORK_DIR`** — the working folder where repos are cloned (below).
 - **`GHDUTY_SLACK_WEBHOOK`** — optional Slack callback for ticket notifications
   (Step 5); unset = Slack silently skipped.
-- **skip-ledger** — `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger.jsonl`,
-  one line per item deliberately judged "no action needed", so later runs don't
-  re-read it. Safe to delete (just forces a re-read). Details in Step 3.
+- **skip-ledger** — a **cache** (not config): a directory
+  `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger/` with **one file per
+  thread**, `<owner>__<repo>__<n>.json` holding `{"updatedAt": "…"}`. One file per
+  key means the parallel workers in Step 3 each write **only their own** file — no
+  shared-file write race, no lock, and it's self-compacting (one file per live
+  thread; the latest write overwrites, and a closed thread's file can be deleted).
+  Safe to delete wholesale (just forces a re-read). Kept separate from the plugin's
+  durable config list (`extra-repos.txt`, managed by `manage-repos`) — config vs
+  cache are different kinds. Details in Step 3.
 
 **(a) Working folder — checked EVERY run.** Where repos live / get cloned so
 `/ticket` lands in the right repo (Step 4). Two gates each time:
@@ -88,27 +94,52 @@ out (stale >2yr mention, closed PR, etc.). No first-run gate, no checkbox — th
 signature is what stops re-handling, and the durable queries + filters are what
 scope the work. Built to run unattended.
 
-## Step 3 — fan out: one subagent per item (parallel)
+## Step 3 — fan out via the Workflow tool (parallel, capped ~10)
 
-Spawn **one subagent per queue item** with the `Agent` tool, launched in parallel
-(multiple `Agent` calls in one message). Each returns
-`{repo, number, action: replied|ticketed|reviewed|skipped, ticket_path?, note}`.
-The orchestrator collects results for Steps 4–5. **Dedupe target repos and clone
-each unique one once before fan-out** (Step 4) — concurrent clones of the same
-repo clash; separate `/ticket` writes into an existing clone are safe.
+Handle the queue with the **Workflow tool**, not ad-hoc `Agent` calls — one
+`agent()` per queue item inside a `parallel()`, so concurrency is **auto-capped at
+`min(16, cores−2)` ≈ 10** (a hand-rolled fan-out of 20+ `Agent` calls has no cap
+and hammers `gh` / rate limits). The workflow is deterministic and resumable, and
+each `agent()` returns
+`{repo, number, action: replied|ticketed|reviewed|skipped, ticket_path?, updatedAt, note}`
+which the script collects for Steps 4–5.
 
-Each subagent must have the `workaholic` and `code-review` skills available (it
-runs `/ticket` / `/code-review`) and does all remote writes through the **GitHub
-MCP** (branch, file commit, comment) — never `git push` / `gh` write commands,
-which permission policy often blocks.
+Workflow shape:
 
-**Ledger fast-skip (orchestrator, before fan-out).** For each queue item, check
-the skip-ledger first: if `owner/repo#n` is recorded with the **same `updatedAt`**
-the query returned (i.e. no new activity since you last judged it not worth
-acting on), drop it from the work set — no subagent, no thread read. If the item
-isn't in the ledger, or its `updatedAt` changed (new activity), it goes to a
-subagent. This is what stops "considered, no action" items from being re-read
-every run; the signature (remote) still covers items you *did* act on.
+```
+// after Step 1 dedupe + the ledger fast-skip below, `items` is the work set
+phase('Handle')
+const results = await parallel(items.map(it => () =>
+  agent(handlePrompt(it), { label: `${it.repo}#${it.number}`, schema: RESULT })
+))
+// then Steps 4–5 from results.filter(Boolean)
+```
+
+- **Pre-clone unique repos before the parallel stage** (a barrier): dedupe target
+  repos and clone each once first — concurrent clones of the *same* repo clash.
+  Alternatively give ticket-writing agents `isolation: 'worktree'` so parallel
+  `/ticket` on one repo can't collide. Separate `/ticket` writes into an existing
+  clone are safe.
+- Each `agent()` must have the `workaholic` and `code-review` skills available (it
+  runs `/ticket` / `/code-review`) and does all remote writes through the **GitHub
+  MCP** (branch, file commit, comment) — never `git push` / `gh` write commands,
+  which permission policy often blocks.
+- **Parallel recording is safe** because the skip-ledger is one-file-per-key: a
+  no-action agent writes only its own `<owner>__<repo>__<n>.json` (atomic temp +
+  rename), so concurrent workers never contend (see the recording step below).
+
+**Ledger fast-skip (orchestrator, before fan-out).** For each queue item, read its
+per-key file `skip-ledger/<owner>__<repo>__<n>.json`: if it exists with the **same
+`updatedAt`** the query returned (no new activity since you last judged it not worth
+acting on), drop it from the work set — no agent, no thread read. If the file is
+missing or its `updatedAt` differs (new activity), the item goes into `items` for
+the parallel stage. This is what stops "considered, no action" items from being
+re-read every run; the signature (remote) still covers items you *did* act on.
+
+```bash
+LED="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"; mkdir -p "$LED"
+key(){ echo "$LED/$(echo "$1" | tr '/#' '__').json"; }   # owner/repo#n -> file
+```
 
 ### What each per-item subagent does
 
@@ -130,12 +161,18 @@ every run; the signature (remote) still covers items you *did* act on.
    is the durable, remote marker instead. A thread becomes actionable again only
    when someone comments after ghDuty's signed comment (i.e. real follow-up).
 3. **Classify** (table below) and **handle** per Step 4, signed.
-4. **Return** the structured result. If the verdict is **no action needed**
-   (nothing actionable — a bare FYI, an ack, a resolved thread), return
-   `skipped` with the thread's `updatedAt`; the orchestrator appends it to the
-   skip-ledger (`{repo, number, updatedAt}`) so the ledger fast-skip suppresses
-   it next run until new activity bumps `updatedAt`. Items that were *acted on*
-   are NOT ledgered — their signed comment is the marker.
+4. **Return** the structured result, and — if the verdict is **no action needed**
+   (nothing actionable — a bare FYI, an ack, a resolved thread) — **record it in the
+   agent itself** by writing its own per-key ledger file (parallel-safe: distinct
+   path per key, atomic temp + rename):
+   ```bash
+   f="$(key "<owner>/<repo>#<n>")"; tmp="$(mktemp)"
+   jq -n --arg u "<updatedAt>" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+   ```
+   so the fast-skip suppresses it next run until new activity bumps `updatedAt`.
+   Items that were *acted on* are NOT ledgered — their signed comment is the marker.
+   (Because each agent writes only its own key's file, parallel workers never race —
+   no shared-file append, no lock.)
 
 Action is driven by **which query surfaced the item** and, for assigned items,
 its subtype. An item can be in more than one query; do all that apply.

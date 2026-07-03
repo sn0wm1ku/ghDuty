@@ -126,8 +126,9 @@ for the active sprints.
 
 Rather than hand-editing `GHDUTY_EXTRA_REPOS`, use the **`/manage-repos`** tool to
 add/remove/list extra repos (`/manage-repos add otherorg/repo`); it validates the
-repo exists and persists it to a config file the summary reads (unioned with the env
-var and board).
+repo exists and persists it to its own list file (`extra-repos.txt`, one `owner/repo`
+per line — bulk-editable for teams tracking many client repos) that the summary
+reads, unioned with the env var and board.
 
 or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes
