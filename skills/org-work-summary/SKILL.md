@@ -52,16 +52,8 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
   (`AskUserQuestion`) and tell them to persist it in their
   [settings.json](https://code.claude.com/docs/en/settings) `env` block:
   `"env": { "GHDUTY_ORG": "<org>" }`. No run-state, no local files.
-- **`GHDUTY_PROJECT`** *(optional)* — an org Project board as `<owner>/<number>`
-  (e.g. `osbrjp/7`). The team's real work often spans repos **outside** the org
-  (a parent company's org, a personal fork), which an org-only search silently
-  misses. When set, the repo set is **widened to every repo referenced by items on
-  that board** (Step 2), so non-org work is counted. `gh search --project` filtering
-  needs **no extra token scope**; true per-sprint/iteration filtering *does* need
-  `read:project` (see Step 2 note), so absent that scope the board's current items
-  stand in for "the active sprints".
 - **`GHDUTY_EXTRA_REPOS`** *(optional)* — comma-separated `owner/repo` list of extra
-  repos to always include (incl. non-org), for teams without a board.
+  repos to always include (incl. non-org repos the org search misses).
 - **extra-repos list file** — `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/extra-repos.txt`,
   one `owner/repo` per line (its own file — the list can grow large, e.g. every
   client repo a team tracks). The plugin's **own** file, not Claude's `settings.json`;
@@ -71,7 +63,7 @@ gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 
 ```bash
 [ -n "$GHDUTY_ORG" ] && echo "org: $GHDUTY_ORG" || echo "GHDUTY_ORG unset — ask the user"
-echo "board: ${GHDUTY_PROJECT:-none}   extra repos: ${GHDUTY_EXTRA_REPOS:-none}"
+echo "extra repos: ${GHDUTY_EXTRA_REPOS:-none}"
 ```
 
 ## Step 1 — compute the week window
@@ -116,13 +108,13 @@ gh search issues --owner="$GHDUTY_ORG" --state=open --limit 200 \
   --json repository,number,title,url,assignees,labels,createdAt,updatedAt
 ```
 
-### Widen to non-org repos (board / extra repos)
+### Widen to non-org repos (extra repos)
 
 `--owner=$GHDUTY_ORG` only sees repos *in the org*. Work in a parent-company org, a
-personal fork, or a partner repo is invisible to it — which silently under-counts
-contributors (someone's whole week can live in `otherorg/repo`). The extra-repo set
-is the **union** of three sources — the `GHDUTY_EXTRA_REPOS` env var, the
-`manage-repos` config file, and (if set) the `GHDUTY_PROJECT` board:
+personal fork, or a partner/client repo is invisible to it — which silently
+under-counts contributors (someone's whole week can live in `otherorg/repo`). The
+extra-repo set is the **union** of the `GHDUTY_EXTRA_REPOS` env var and the
+`manage-repos` list file:
 
 ```bash
 REPOS="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/extra-repos.txt"
@@ -130,46 +122,22 @@ REPOS="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/extra-repos.txt"
   | sed 's/^ *//;s/ *$//' | grep -E '^[^/ ]+/[^/ ]+$' | sort -u   # extra repos to include
 ```
 
-If `GHDUTY_PROJECT` or any extra repo is present, also gather those repos:
+For each extra repo, re-run the same THROUGHPUT + WIP queries scoped with
+`-R <owner/repo>` instead of `--owner`, then union into the same sets below:
 
 ```bash
-# repos referenced by the board (works with NO read:project scope):
-if [ -n "$GHDUTY_PROJECT" ]; then
-  { gh search prs    --project "$GHDUTY_PROJECT" --limit 300 --json repository
-    gh search issues --project "$GHDUTY_PROJECT" --limit 300 --json repository; } \
-  | jq -r '.[].repository.nameWithOwner' | sort -u    # the working repo set, incl. non-org
-fi
-# for each repo NOT under $GHDUTY_ORG (and each GHDUTY_EXTRA_REPOS entry), re-run the
-# same THROUGHPUT + WIP queries scoped with -R <owner/repo> instead of --owner, e.g.:
-#   gh search commits --repo "ozcoltd/nrha-main" --author-date="$SINCE..$UNTIL" --limit 100 --json author,repository,sha
-#   gh search prs     --repo "ozcoltd/nrha-main" --merged --merged-at="$SINCE..$UNTIL" --limit 100 --json repository,number,title,author,url,closedAt
-# then union into the same sets below. (commits search rejects a qualifier-only query —
-# the --author-date range counts as the search text, so keep it.)
+#   gh search prs     -R "<owner/repo>" --merged --merged-at="$SINCE..$UNTIL" --limit 100 --json repository,number,title,author,url,closedAt
+#   gh search commits -R "<owner/repo>" --author-date="$SINCE..$UNTIL" --limit 100 --json author,repository,sha
+# (commits search rejects a qualifier-only query — the --author-date range is the search text, so keep it.)
 ```
-
-> **Sprint filtering.** The Projects v2 API has **no distinct/group-by/aggregate and
-> no server-side iteration filter** — you must enumerate items and dedupe locally.
-> The clean way is `gh project item-list` (it handles pagination in one call; needs
-> the `read:project` scope — `gh auth refresh -h github.com -s read:project`):
-> ```bash
-> # recent-5 sprint titles from the iteration field, then distinct repos in them:
-> gh project item-list <n> --owner <org> -L 1000 --format json \
->   | jq -r --argjson t '["sprint 69","sprint 70","sprint 71","sprint 72","sprint 73"]' \
->       '.items[]|select((.sprint.title//"") as $s|$t|index($s))|.content.repository//empty' | sort -u
-> ```
-> (Get the recent-5 titles by sorting the iteration field's `iterations+completedIterations`
-> by `startDate`.) **Without `read:project`**, fall back to `gh search --project
-> <org>/<n>` — which returns items *currently on the board* (no per-sprint slice) — and
-> **say in the report** that it's a current-board approximation, not a true 5-sprint cut.
-> Don't hand-roll paginated GraphQL loops (slow, times out) when `item-list` does it.
 
 Derive:
 - **Abandoned PRs this week** = closed-this-week set **minus** merged-this-week set
   (by `repo#number`) — PRs closed without merging.
 - **PR work-set for Step 3** = merged-this-week ∪ open PRs (dedupe by `repo#number`),
-  **across the org AND every extra/board repo** — the non-org PRs get the same deep
-  read as org PRs, not just a count (that's the whole point of widening the scope).
-  Abandoned PRs just get counted.
+  **across the org AND every extra repo** — the non-org PRs get the same deep read as
+  org PRs, not just a count (that's the whole point of widening the scope). Abandoned
+  PRs just get counted.
 
 If any query hits its `--limit`, **say so in the report** — the counts are a lower
 bound, not the truth. Never present a capped number as complete.
@@ -180,9 +148,9 @@ bound, not the truth. Never present a capped number as complete.
 
 ## Step 3 — deep-analyze each PR (fan out, parallel)
 
-Spawn **one subagent per PR** in the work-set — **org and extra/board (non-org)
-repos alike**; a non-org PR is read with `gh pr view/diff -R <owner/repo>` and gets
-the same verdict as an org one, never just a tally. Each subagent is the
+Spawn **one subagent per PR** in the work-set — **org and extra (non-org) repos
+alike**; a non-org PR is read with `gh pr view/diff -R <owner/repo>` and gets the
+same verdict as an org one, never just a tally. Each subagent is the
 **`schedule-planner`** agent type (`subagent_type: "schedule-planner"`) — a
 delivery-progress analyst persona, not the general-purpose one. It reads the diff
 *and* the linked issue and judges the PR against **what it set out to do**, not what

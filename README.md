@@ -107,28 +107,20 @@ Set the org via `GHDUTY_ORG` in your settings `env` block (it asks if unset):
 ```
 
 Teams often work in repos **outside** the org (a parent company's org, a personal
-fork), which an org-only search misses — under-counting whoever's week lived there.
-Two optional knobs widen the scope:
+fork, a client repo), which an org-only search misses — under-counting whoever's
+week lived there. Add those extra repos with the **`/manage-repos`** tool — an
+interactive flow that lets you point at a file, or add repos one by one, and
+validates each exists before saving:
 
-```json
-{ "env": {
-    "GHDUTY_ORG": "your-org",
-    "GHDUTY_PROJECT": "your-org/7",
-    "GHDUTY_EXTRA_REPOS": "otherorg/repo,someone/fork"
-} }
+```
+/manage-repos          # interactive: upload/paste a file, or add one by one
+/manage-repos add otherorg/repo
+/manage-repos list
 ```
 
-`GHDUTY_PROJECT` points at an org Project board; the report widens to **every repo
-referenced by items on that board** (non-org included). Board filtering needs no
-extra token scope; true per-sprint/iteration filtering needs `read:project`
-(`gh auth refresh -s read:project`) — without it, the board's current items stand in
-for the active sprints.
-
-Rather than hand-editing `GHDUTY_EXTRA_REPOS`, use the **`/manage-repos`** tool to
-add/remove/list extra repos (`/manage-repos add otherorg/repo`); it validates the
-repo exists and persists it to its own list file (`extra-repos.txt`, one `owner/repo`
-per line — bulk-editable for teams tracking many client repos) that the summary
-reads, unioned with the env var and board.
+It persists to a list file (`extra-repos.txt`, one `owner/repo` per line —
+bulk-editable for teams tracking many client repos) that the summary reads, unioned
+with the optional `GHDUTY_EXTRA_REPOS` env var.
 
 or on a schedule so your inbox gets worked unattended (Claude Code
 [`/schedule`](https://code.claude.com/docs/en/schedule) or a cron that invokes

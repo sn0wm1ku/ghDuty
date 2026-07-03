@@ -1,6 +1,6 @@
 ---
 name: manage-repos
-description: 'Add, remove, or list the extra (often non-org) repos that org-work-summary includes on top of the org-wide search — e.g. a parent company''s org, a personal fork, or every client repo a team tracks that GHDUTY_ORG''s search misses. Persists them in the plugin''s own list file (extra-repos.txt, one owner/repo per line) so you don''t hand-edit Claude''s settings.json. Use when the user says "add a repo to the org summary", "track otherorg/repo in the weekly report", "list the extra repos", "remove a repo from ghduty", or "/manage-repos add owner/repo".'
+description: 'Add, remove, or list the extra (often non-org) repos that org-work-summary includes on top of the org-wide search — e.g. a parent company''s org, a personal fork, or every client repo a team tracks that GHDUTY_ORG''s search misses. Bare `/manage-repos` runs an interactive dialog (point at / upload a file, or add repos one by one), validating each exists; explicit `add`/`remove`/`list` sub-commands also work. Persists to the plugin''s own list file (extra-repos.txt, one owner/repo per line) so you don''t hand-edit Claude''s settings.json. Use when the user says "add a repo to the org summary", "track otherorg/repo in the weekly report", "list the extra repos", "remove a repo from ghduty", or "/manage-repos".'
 ---
 
 # Manage extra repos (org-work-summary)
@@ -26,8 +26,24 @@ mkdir -p "$DIR"; touch "$REPOS"   # one owner/repo per line; blank lines & # com
 
 ## Actions
 
-Parse the invocation for one of: `add <owner/repo>…`, `remove <owner/repo>…`,
-`list` (default when no args).
+If the invocation carries an explicit sub-command (`add <owner/repo>…`,
+`remove <owner/repo>…`, `list`), do that directly. **Otherwise (bare
+`/manage-repos`, or unclear input) run the interactive dialog** — don't guess.
+
+### Interactive dialog (default)
+
+Ask the user how they want to update the list (`AskUserQuestion`), then act:
+
+1. **From a file** — ask for a path to a file, or for them to paste/upload a list
+   (one `owner/repo` per line; `#` comments and blank lines ignored). Read it, and
+   for each line run the **add validation** below. Report added / duplicate /
+   rejected counts. Good for bulk (a whole client-repo list at once).
+2. **Add one by one** — ask for a repo (`owner/repo`), validate + append, then ask
+   "another?" and loop until they're done.
+3. **List current** — show the list (below).
+4. **Remove** — ask which `owner/repo` to drop, then remove (below).
+
+Then always show the updated `list`.
 
 ### list  (default)
 ```bash
