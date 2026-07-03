@@ -323,20 +323,27 @@ list each ticket with its repo, source issue, and the **branch that was pushed**
 so you can `/drive` it. The webhook posts as its own app, so you actually get
 notified.
 
-**Canonical message format — use this exact shape every run** (Slack mrkdwn: `*bold*`,
-backticked branch, one block per ticket). Don't improvise a different layout — a
-consistent format is how the reader recognizes it:
+**Canonical message format — the committed workflow builds this; don't improvise.**
+**List every handled item, item-by-item, NEVER collapsed into a tally** — grouped by
+action, and **every item is a clickable Slack link** (`<url|owner/repo#n>`) to its
+issue/PR (ticket branches link too, `<…/tree/branch|branch>`):
 
 ```
-:ticket: *ghDuty — <N> ticket(s) created*
-• *<owner/repo>#<n>* — <short issue/PR title>
-  branch `<branch>` · run `/drive` to implement
-• *<owner/repo>#<n>* — <short issue/PR title>
-  branch `<branch>` · run `/drive` to implement
+:robot_face: *ghDuty run* — <N> items handled (+<M> ledger fast-skipped)
+
+*:ticket: Tickets created (K):*
+• <https://github.com/owner/repo/pull/12|owner/repo#12> — <title>
+  branch <https://github.com/owner/repo/tree/ghduty/ticket-…|ghduty/ticket-…> · run `/drive`
+
+*:mag: Reviewed (K):*  /  *:white_check_mark: Approved (K):*
+• <url|owner/repo#n> — <one-line>
+
+*:memo: Acknowledged (K):*  /  *:speech_balloon: Replied (K):*  /  *:fast_forward: Already signed (K):*  /  *:white_circle: No action (K):*  /  *:hourglass: Stale (K):*  /  *:no_entry: Not my repo (K):*
+• <url|owner/repo#n>
 ```
 
-Optionally follow with a one-line run tally (`_also: N reviewed, M acked, K replied;
-X already-signed, …_`). Build `$MSG` in that shape, then POST:
+Every action group that has ≥1 item is printed with **all** its items listed — no
+`(also: 1 review, 10 acks…)` collapsing. Then POST:
 
 ```bash
 if [ -n "$GHDUTY_SLACK_WEBHOOK" ]; then   # and ≥1 ticket created

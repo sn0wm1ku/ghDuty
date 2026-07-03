@@ -26,6 +26,7 @@ const RESULT = {
   type: 'object',
   properties: {
     repo: { type: 'string' }, number: { type: 'integer' }, title: { type: 'string' },
+    url: { type: 'string' },
     action: { type: 'string', enum: ['replied', 'acked', 'ticketed', 'reviewed', 'approved', 'skipped-signed', 'skipped-stale', 'skipped-not-mine', 'skipped-noaction', 'error'] },
     branch: { type: 'string' }, note: { type: 'string' },
   },
@@ -81,7 +82,7 @@ const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** 
 6. If verdict is no-action, RECORD in the ledger (parallel-safe, own key only):
    LED="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"; f="$LED/$(echo "${it.repo}#${it.number}" | tr '/#' '__').json"
    tmp="$(mktemp)"; jq -n --arg u "${it.updatedAt || ''}" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
-7. Return the structured result (include branch for tickets, and the issue/PR title).
+7. Return the structured result: include the issue/PR title, its **url** (html_url of the issue/PR, e.g. https://github.com/${it.repo}/${it.isPR ? 'pull' : 'issues'}/${it.number}), and branch for tickets.
 
 Signature block to append to every posted comment:
 ---
@@ -91,20 +92,41 @@ const results = (await parallel(items.map(it => () =>
   agent(handle(it), { label: `${it.repo}#${it.number}`, schema: RESULT, agentType: 'general-purpose' })
 ))).filter(Boolean)
 
-// ── Notify: Slack ticket notification, canonical format ──────────────────────
+// ── Notify: Slack notification — EVERY item listed, never collapsed ──────────
 phase('Notify')
 const tickets = results.filter(r => r.action === 'ticketed')
+// Grouped sections, but every handled item is printed on its own line (no tallies-only).
+const SECTIONS = [
+  ['ticketed', ':ticket: Tickets created'], ['reviewed', ':mag: Reviewed'],
+  ['approved', ':white_check_mark: Approved'], ['acked', ':memo: Acknowledged'],
+  ['replied', ':speech_balloon: Replied'], ['skipped-signed', ':fast_forward: Already signed'],
+  ['skipped-noaction', ':white_circle: No action'], ['skipped-stale', ':hourglass: Stale (>2yr mention)'],
+  ['skipped-not-mine', ':no_entry: Not my repo'], ['error', ':warning: Error'],
+]
+// Slack mrkdwn links so every item is clickable: <url|text>
+const link = (r) => `<${r.url || `https://github.com/${r.repo}/issues/${r.number}`}|${r.repo}#${r.number}>`
+const branchLink = (r) => r.branch ? `<https://github.com/${r.repo}/tree/${r.branch}|${r.branch}>` : '?'
+const fmt = (r) => r.action === 'ticketed'
+  ? `• ${link(r)} — ${r.title || '(ticket)'}\n  branch ${branchLink(r)} · run \`/drive\``
+  : `• ${link(r)}${r.title ? ' — ' + r.title : ''}${r.note ? ' — ' + r.note : ''}`
+let msg = `:robot_face: *ghDuty run* — ${results.length} items handled` +
+  (((disc && disc.skipped_by_ledger) || 0) ? ` (+${disc.skipped_by_ledger} ledger fast-skipped)` : '')
+for (const [act, label] of SECTIONS) {
+  const rs = results.filter(r => r.action === act)
+  if (rs.length) msg += `\n\n*${label} (${rs.length}):*\n` + rs.map(fmt).join('\n')
+}
+
 let notified = false
-if (tickets.length) {
-  const lines = tickets.map(t => `• *${t.repo}#${t.number}* — ${t.title || '(ticket)'}\n  branch \`${t.branch || '?'}\` · run \`/drive\` to implement`).join('\n')
+if (results.length) {
   const n = await agent(
-    `Send the ghDuty Slack ticket notification, but ONLY if GHDUTY_SLACK_WEBHOOK is set (else return {sent:false, reason:"no webhook"}). Use EXACTLY this canonical format as the message text (Slack mrkdwn):
+    `Send this ghDuty run notification to Slack, but ONLY if GHDUTY_SLACK_WEBHOOK is set (else return {sent:false, reason:"no webhook"}). Post the message text VERBATIM — every item is listed item-by-item on purpose; do NOT collapse, summarize, or drop any line. The message:
 
-:ticket: *ghDuty — ${tickets.length} ticket(s) created*
-${lines}
+<<<MSG
+${msg}
+MSG
 
-POST it: curl -sS -X POST -H 'Content-type: application/json' --data "$(jq -n --arg t "$MSG" '{text:$t}')" "$GHDUTY_SLACK_WEBHOOK"
-If the POST is denied by the auto-mode classifier (missing autoMode.allow grant), return {sent:false, reason:"blocked-need-grant"} and include the ready-to-run curl in reason — do NOT treat it as a run failure. Return {sent:true} on HTTP 200.`,
+POST: MSG_TEXT is the block above; curl -sS -X POST -H 'Content-type: application/json' --data "$(jq -n --arg t "$MSG_TEXT" '{text:$t}')" "$GHDUTY_SLACK_WEBHOOK"
+If denied by the auto-mode classifier (missing autoMode.allow grant), return {sent:false, reason:"blocked-need-grant: <ready-to-run curl>"} — not a run failure. Return {sent:true} on HTTP 200.`,
     { label: 'slack-notify', schema: { type: 'object', properties: { sent: { type: 'boolean' }, reason: { type: 'string' } }, required: ['sent'] }, agentType: 'general-purpose' }
   )
   notified = !!(n && n.sent)
