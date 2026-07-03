@@ -37,32 +37,14 @@ const LED = "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"
 
 // ── Discover: search, dedupe, migrate + apply ledger fast-skip ───────────────
 phase('Discover')
-const disc = await agent(
-  `ghDuty gh-mentions DISCOVERY. Do all of this with the gh CLI + jq and return the deduped, ledger-filtered work set.
-
-1. Run the three durable queries:
-   gh search prs    --review-requested=@me --state open --limit 100 --json repository,number,title,url,updatedAt
-   gh search issues --assignee=@me   --include-prs --state open --limit 100 --json repository,number,title,url,isPullRequest,updatedAt
-   gh search issues --mentions=@me   --include-prs --state open --limit 100 --json repository,number,title,url,isPullRequest,updatedAt
-2. Dedupe by repo#number; union the source tags (review/assigned/mention) into srcs.
-3. LEDGER SETUP + ONE-TIME MIGRATION (mandatory):
-   DIR="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}"; LED="$DIR/skip-ledger"; mkdir -p "$LED"
-   key(){ echo "$LED/$(echo "$1" | tr '/#' '__').json"; }
-   # migrate a legacy single-file ledger so its entries still count, then retire it:
-   if [ -f "$DIR/skip-ledger.jsonl" ]; then
-     jq -c '.' "$DIR/skip-ledger.jsonl" | while IFS= read -r l; do
-       r=$(echo "$l" | jq -r '.repo'); n=$(echo "$l" | jq -r '.number')
-       [ -n "$r" ] && [ "$r" != null ] && echo "$l" > "$(key "$r#$n")"; done
-     mv "$DIR/skip-ledger.jsonl" "$DIR/skip-ledger.jsonl.migrated"
-   fi
-4. LEDGER FAST-SKIP (mandatory, never bypass): for each deduped item, read its per-key
-   file "$(key repo#n)"; if it exists AND its updatedAt EQUALS the query's updatedAt
-   (no new activity), DROP it from the work set. Count how many you dropped.
-5. Return {items:[{repo,number,isPR,srcs,updatedAt,title}], skipped_by_ledger:<count>}.`,
-  { label: 'discover', schema: QUEUE, agentType: 'general-purpose' }
-)
-const items = (disc && disc.items) || []
-log(`${items.length} actionable · ${(disc && disc.skipped_by_ledger) || 0} fast-skipped by ledger`)
+// Discovery, ledger migration, and the ledger fast-skip are done in CODE (bash
+// gh + jq) by the skill BEFORE this workflow is invoked — no LLM is spent on that
+// mechanical search/dedupe/diff. The pre-filtered survivor work-set arrives via args:
+//   args = { items: [{repo, number, isPR, srcs, updatedAt, title}], fast_skipped: <int> }
+// The workflow spends LLM only on the items that actually need judgement.
+const items = (args && args.items) || []
+const fastSkipped = (args && args.fast_skipped) || 0
+log(`${items.length} items to handle · ${fastSkipped} fast-skipped by ledger (done in code)`)
 
 // ── Handle: one agent per item ───────────────────────────────────────────────
 phase('Handle')
@@ -121,7 +103,7 @@ const fmt = (r) => r.action === 'ticketed'
   ? `• ${link(r)} — ${r.title || '(ticket)'}\n  branch ${branchLink(r)} · run \`/drive\``
   : `• ${link(r)}${r.title ? ' — ' + r.title : ''}${r.note ? ' — ' + r.note : ''}`
 let msg = `:robot_face: *ghDuty run* — ${results.length} items handled` +
-  (((disc && disc.skipped_by_ledger) || 0) ? ` (+${disc.skipped_by_ledger} ledger fast-skipped)` : '')
+  (fastSkipped ? ` (+${fastSkipped} ledger fast-skipped)` : '')
 for (const [act, label] of SECTIONS) {
   const rs = results.filter(r => r.action === act)
   if (rs.length) msg += `\n\n*${label} (${rs.length}):*\n` + rs.map(fmt).join('\n')
@@ -151,4 +133,4 @@ Do NOT try to talk around or bypass any permission denial. Return {sent:true} on
 
 const by = {}
 for (const r of results) by[r.action] = (by[r.action] || 0) + 1
-return { total: items.length, fast_skipped: (disc && disc.skipped_by_ledger) || 0, by, notified, tickets: tickets.map(t => ({ repo: t.repo, number: t.number, branch: t.branch })) }
+return { total: items.length, fast_skipped: fastSkipped, by, notified, tickets: tickets.map(t => ({ repo: t.repo, number: t.number, branch: t.branch })) }

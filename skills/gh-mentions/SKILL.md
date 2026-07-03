@@ -70,51 +70,61 @@ There is **no first-run marker** — every run behaves the same. The only local
 file is the skip-ledger (an optimization cache, above); correctness lives in the
 remote thread signatures.
 
-## Step 1 — build the work set (durable queries)
+## Step 1 — discover + ledger fast-skip **in CODE** (no LLM)
 
-Union of three durable queries — these reflect current state, so they don't
-vanish when a notification is read:
+The mechanical part — fetch the queue, dedupe, and drop already-handled items via
+the ledger — is **pure bash/gh/jq, run by the main agent before the workflow**. No
+LLM tokens on searching/deduping/diffing; the LLM is spent only on the survivors
+(Step 3). Do it all here and produce the survivor work-set:
 
 ```bash
-# PRs awaiting your review
-gh search prs --review-requested=@me --state open --limit 100 \
-  --json repository,number,title,url,updatedAt
-# issues/PRs assigned to you
-gh search issues --assignee=@me --include-prs --state open --limit 100 \
-  --json repository,number,title,url,isPullRequest,updatedAt
-# issues/PRs that @-mention you
-gh search issues --mentions=@me --include-prs --state open --limit 100 \
-  --json repository,number,title,url,isPullRequest,updatedAt
+DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}"; LED="$DIR/skip-ledger"; mkdir -p "$LED"
+key(){ echo "$LED/$(echo "$1" | tr '/#' '__').json"; }
+# one-time migration of a legacy single-file ledger (so nothing already handled is lost):
+if [ -f "$DIR/skip-ledger.jsonl" ]; then
+  jq -c '.' "$DIR/skip-ledger.jsonl" | while IFS= read -r l; do
+    r=$(echo "$l"|jq -r .repo); n=$(echo "$l"|jq -r .number)
+    [ "$r" != null ] && echo "$l" > "$(key "$r#$n")"; done
+  mv "$DIR/skip-ledger.jsonl" "$DIR/skip-ledger.jsonl.migrated"
+fi
+# three durable queries → dedupe by repo#number (union src tags):
+{ gh search prs    --review-requested=@me --state open --limit 100 --json repository,number,title,url,updatedAt          | jq '[.[]+{src:"review"}]'
+  gh search issues --assignee=@me   --include-prs --state open --limit 100 --json repository,number,title,url,isPullRequest,updatedAt | jq '[.[]+{src:"assigned"}]'
+  gh search issues --mentions=@me   --include-prs --state open --limit 100 --json repository,number,title,url,isPullRequest,updatedAt | jq '[.[]+{src:"mention"}]'; } \
+| jq -s 'add | group_by(.repository.nameWithOwner+"#"+(.number|tostring))
+   | map({repo:.[0].repository.nameWithOwner, number:.[0].number, title:.[0].title,
+          isPR:(.[0].isPullRequest//false), srcs:(map(.src)|unique), updatedAt:.[0].updatedAt})' > /tmp/ghd_all.json
+# LEDGER FAST-SKIP (code): keep only items whose ledgered updatedAt != current (or unledgered):
+jq -c '.[]' /tmp/ghd_all.json | while IFS= read -r it; do
+  r=$(echo "$it"|jq -r .repo); n=$(echo "$it"|jq -r .number); u=$(echo "$it"|jq -r .updatedAt)
+  f="$(key "$r#$n")"
+  if [ -f "$f" ] && [ "$(jq -r .updatedAt "$f")" = "$u" ]; then :; else echo "$it"; fi
+done | jq -s '.' > /tmp/ghd_items.json
+echo "survivors: $(jq length /tmp/ghd_items.json) · fast-skipped: $(( $(jq length /tmp/ghd_all.json) - $(jq length /tmp/ghd_items.json) ))"
 ```
-
-Dedupe by `repo#number`; tag each with why it's here (review-requested /
-assigned / mentioned). This is the full queue of GitHub work waiting on you.
 
 ## Step 2 — (nothing to pick)
 
-Every run handles every item in the queue that isn't already signed or filtered
-out (stale >2yr mention, closed PR, etc.). No first-run gate, no checkbox — the
-signature is what stops re-handling, and the durable queries + filters are what
-scope the work. Built to run unattended.
+Every survivor is handled; the ledger + filters (stale >2yr mention, closed PR,
+signature) are what scope the work. No first-run gate, no checkbox.
 
-## Step 3 — run the bundled workflow (deterministic; do NOT hand-author a fan-out)
+## Step 3 — run the bundled workflow on the survivors (LLM only here)
 
-**Invoke the committed workflow script — do not re-improvise the orchestration.**
-The full flow (discover + dedupe + **ledger fast-skip** + one agent per item +
-Slack notify) lives in one script so no step is ever dropped:
+**Invoke the committed workflow with the survivor set as `args` — do not re-improvise
+a fan-out.** The workflow LLM-handles only the items Step 1 didn't fast-skip:
 
 ```
-Workflow({ scriptPath: "${CLAUDE_PLUGIN_ROOT}/workflows/gh-mentions.js" })
+Workflow({ name: "ghduty:gh-mentions",
+           args: { items: <contents of /tmp/ghd_items.json>,
+                   fast_skipped: <the fast-skipped count> } })
 ```
 
-That is the single source of truth for execution. It fans out via `parallel()`
-(concurrency auto-capped at `min(16, cores−2)`), each item handled by its own
-`general-purpose` agent that does all remote writes through the **GitHub MCP**
-(never `git push`/`gh` write), applies the ledger fast-skip **and** records
-no-action items, auto-approves LGTM reviews, and sends the Step 5 Slack notice in
-the canonical format. **Never** substitute an ad-hoc `Agent` fan-out or a
-hand-written workflow — that is exactly how the ledger fast-skip and Slack step got
-dropped before, re-creating already-ledgered tickets.
+It fans out via `parallel()` (concurrency auto-capped `min(16, cores−2)`), one
+`general-purpose` agent per item doing all remote writes through the **GitHub MCP**
+(never `git push`/`gh` write), LGTM-auto-approving reviews, ledgering every terminal
+verdict (Step 3-item-4), and sending the Step 5 Slack notice. **Never** substitute an
+ad-hoc `Agent` fan-out — the committed script is the single source of truth so no step
+is dropped.
 
 The sections below **document what the script does** (per-item classification,
 idempotency, ledger, signature) — they are the spec the script implements, not a
