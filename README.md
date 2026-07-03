@@ -77,8 +77,11 @@ description) to judge it against what it set out to do:
 - **merged PRs** → **quality**: what was done well and any room for improvement,
   each point cited to a hunk in the diff.
 
-It then writes **what shipped**, **what's in flight (with progress)**, and a
-**per-contributor breakdown**. It posts nothing and keeps no state — just a report.
+It then writes **what shipped**, **what's in flight (with progress)**, a
+**per-repo issue status** (completed this week vs pending — pending split into
+*active assigned*, *active unassigned*, and *iceboxed*), **per-repo commit counts
+grouped by contributor**, and a **per-contributor breakdown**. It posts nothing
+and keeps no state — just a report.
 
 Set the org via `GHDUTY_ORG` in your settings `env` block (it asks if unset):
 

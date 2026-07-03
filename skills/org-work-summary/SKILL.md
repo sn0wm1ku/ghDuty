@@ -1,6 +1,6 @@
 ---
 name: org-work-summary
-description: 'Summarize a GitHub org''s work for the current week (last Saturday through today), across all repos: what shipped, how far in-flight work has progressed, and who contributed. Pulls org-wide search state (merged/opened PRs, closed/opened issues, commits) scoped to the week, then fans out one read-only subagent per PR to read its DIFF and linked issue — for open PRs it gauges progress against the objective (how much implemented, how far to go), for merged PRs it judges quality (what was done well, room for improvement). Writes a themed summary plus a per-contributor breakdown. Use when the user says "org weekly summary", "what did the org ship this week", "how far along is our work", "who worked on what this week", or runs it on a Friday schedule.'
+description: 'Summarize a GitHub org''s work for the current week (last Saturday through today), across all repos: what shipped, how far in-flight work has progressed, and who contributed. Pulls org-wide search state (merged/opened PRs, closed/opened issues, commits) scoped to the week, then fans out one read-only subagent per PR to read its DIFF and linked issue — for open PRs it gauges progress against the objective (how much implemented, how far to go), for merged PRs it judges quality (what was done well, room for improvement). Also gives a per-repo issue status (completed this week vs pending — pending split into active-assigned, active-unassigned, iceboxed) and per-repo commit counts grouped by contributor. Writes a themed summary plus a per-contributor breakdown. Use when the user says "org weekly summary", "what did the org ship this week", "how far along is our work", "who worked on what this week", or runs it on a Friday schedule.'
 ---
 
 # Org weekly work summary
@@ -68,6 +68,10 @@ gh search issues --owner="$GHDUTY_ORG" --created="$SINCE..$UNTIL" --limit 100 \
 # commits authored this week (catches work outside PRs)
 gh search commits --owner="$GHDUTY_ORG" --author-date="$SINCE..$UNTIL" --limit 100 \
   --json repository,author,commit,sha,url
+# ALL open issues in the org (NOT week-scoped) — the current pending backlog, for
+# the per-repo status breakdown in Step 4. --include-prs is omitted so PRs don't count.
+gh search issues --owner="$GHDUTY_ORG" --state=open --limit 200 \
+  --json repository,number,title,url,assignees,labels,updatedAt
 ```
 
 If any query hits the 100-item `--limit`, note in the report that results were
@@ -137,7 +141,30 @@ From the collected JSON (Step 2) and the per-PR verdicts (Step 3), write:
 3. **In flight** — open PRs with their **progress** (`4/6 done — remaining: …`),
    so the reader sees how far each is and what's left. Flag stalled ones (open,
    little of the objective done).
-4. **Who contributed** — per-person breakdown keyed on `author.login` (union of PR
+4. **Per-repo issue status** — for each repo with activity or open issues, a
+   compact breakdown:
+   - **Commits this week, by contributor** — from Step 2's commit query, group by
+     `repository` then by `author.login`, and show the count per person
+     (`alice ×12, bob ×3` — total 15). This is the per-repo commit tally the report
+     leads its contributor picture with. (Capped at the commit query's `--limit`;
+     if that cap was hit, say the counts are a lower bound.)
+   - **Completed this week** — issues closed this week (from Step 2's closed-issue
+     query, grouped by repo). List `#n title`.
+   - **Pending** — the repo's open issues (from the org-wide open-issues query),
+     classified into three buckets:
+     - **iceboxed** — parked / not being worked. An issue is iceboxed if it carries
+       a parked label (`icebox`, `backlog`, `on-hold`, `blocked`, `wontfix`,
+       `someday`, `deferred` — case-insensitive substring match) **or** hasn't been
+       updated in 90+ days (`updatedAt` older than `UNTIL − 90d`).
+       <!-- ponytail: label-set + 90d staleness heuristic; make the label list / window a config var if a repo's conventions differ -->
+     - **active assigned** — not iceboxed, has ≥1 `assignees` entry (someone owns it).
+     - **active unassigned** — not iceboxed, no assignee (open work with no owner —
+       worth flagging).
+
+     Show counts per bucket and list the active ones (`#n title` + assignee for the
+     assigned bucket); iceboxed can be a count with the oldest few, since the point
+     is that they're parked.
+5. **Who contributed** — per-person breakdown keyed on `author.login` (union of PR
    authors, issue authors, commit authors). For each: counts (merged / open /
    issues closed / commits) and a one-line description of their main thread that
    week, drawing on the PR verdicts. Sort by shipped volume.
