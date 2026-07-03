@@ -319,11 +319,12 @@ write — the signatures posted this run are the only record.
 
 - **Two records, by outcome.** *Acted* (ack/reply/review/ticket) → a signed
   comment in the thread (remote, durable, the correctness record). *Considered
-  but no action* → an entry in the local skip-ledger keyed by `updatedAt` (an
-  optimization so it isn't re-read every run; safe to lose). New activity after
-  either — a comment after our signature, or a bumped `updatedAt` past the ledger
-  entry — makes the item actionable again. Don't look for a ticket file locally:
-  it lives on a remote `ghduty/ticket-*` branch, never checked out into the clone.
+  but no action* → a per-thread file in the local skip-ledger directory holding its
+  `updatedAt` (an optimization so it isn't re-read every run; safe to delete). New
+  activity after either — a comment after our signature, or a bumped `updatedAt`
+  past the ledger file — makes the item actionable again. Don't look for a ticket
+  file locally: it lives on a remote `ghduty/ticket-*` branch, never checked out
+  into the clone.
 - Durable queries catch assigned work and review requests that the notification
   inbox drops once read; the tradeoff is one thread read per item to check the
   signature. Fine for a scheduled agent.
