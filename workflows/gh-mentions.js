@@ -42,8 +42,10 @@ phase('Discover')
 // mechanical search/dedupe/diff. The pre-filtered survivor work-set arrives via args:
 //   args = { items: [{repo, number, isPR, srcs, updatedAt, title}], fast_skipped: <int> }
 // The workflow spends LLM only on the items that actually need judgement.
-const items = (args && args.items) || []
-const fastSkipped = (args && args.fast_skipped) || 0
+// args may arrive as a JSON string (some harnesses stringify it) — parse first.
+const a = typeof args === 'string' ? JSON.parse(args) : (args || {})
+const items = (a && a.items) || []
+const fastSkipped = (a && a.fast_skipped) || 0
 log(`${items.length} items to handle · ${fastSkipped} fast-skipped by ledger (done in code)`)
 
 // ── Handle: one agent per item ───────────────────────────────────────────────
