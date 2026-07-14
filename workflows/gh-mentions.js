@@ -33,8 +33,6 @@ const RESULT = {
   required: ['repo', 'number', 'action', 'note'],
 }
 
-const LED = "${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"
-
 // ── Discover: search, dedupe, migrate + apply ledger fast-skip ───────────────
 phase('Discover')
 // Discovery, ledger migration, and the ledger fast-skip are done in CODE (bash
@@ -69,10 +67,9 @@ const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** 
    threads every run. **Use the thread's CURRENT updatedAt** (re-read it AFTER you
    posted, since your own comment bumps it — else next run sees a newer updatedAt and
    re-handles). If you posted nothing (no-action / skipped-signed), the queried
-   updatedAt is already current. Write parallel-safe (own key only):
-   LED="\${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}/skip-ledger"; f="$LED/$(echo "${it.repo}#${it.number}" | tr '/#' '__').json"
-   U=$(gh ${it.isPR ? 'pr' : 'issue'} view ${it.number} -R ${it.repo} --json updatedAt -q .updatedAt)
-   tmp="$(mktemp)"; jq -n --arg u "$U" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+   updatedAt is already current. Run the bundled script (single source of truth
+   for the write — the jq is never re-inlined in md or here):
+   \${CLAUDE_PLUGIN_ROOT}/scripts/ledger-write.sh ${it.repo} ${it.number} ${it.isPR ? 'pr' : 'issue'}
    (Skip the ledger write only on action="error". The signed comment remains the
    durable correctness record; the ledger is just the efficiency cache. New activity
    after our signature bumps updatedAt → the fast-skip misses → the item is re-handled,

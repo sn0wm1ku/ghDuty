@@ -147,20 +147,9 @@ missing or its `updatedAt` differs (new activity), the item goes into `items` fo
 the parallel stage. This is what stops "considered, no action" items from being
 re-read every run; the signature (remote) still covers items you *did* act on.
 
-```bash
-DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/ghduty}"; LED="$DIR/skip-ledger"; mkdir -p "$LED"
-key(){ echo "$LED/$(echo "$1" | tr '/#' '__').json"; }   # owner/repo#n -> file
-# ONE-TIME MIGRATION: an older ghDuty used a single-file ledger (skip-ledger.jsonl).
-# Fold it into per-key files so its entries are still honored, then retire it —
-# otherwise the format change silently orphans every previously-ledgered item.
-if [ -f "$DIR/skip-ledger.jsonl" ]; then
-  jq -c '.' "$DIR/skip-ledger.jsonl" | while IFS= read -r l; do
-    r=$(echo "$l" | jq -r '.repo'); n=$(echo "$l" | jq -r '.number')
-    [ -n "$r" ] && [ "$r" != null ] && echo "$l" > "$(key "$r#$n")"
-  done
-  mv "$DIR/skip-ledger.jsonl" "$DIR/skip-ledger.jsonl.migrated"
-fi
-```
+The ledger migration and this fast-skip are done in **Step 1 by
+`scripts/discover.sh`** (the single source of truth) — not re-inlined here. By the
+time the workflow runs, `/tmp/ghd_items.json` already holds only the survivors.
 
 **The ledger fast-skip is MANDATORY every run — never bypass it.** (A hand-authored
 run that skips it re-processes everything the last run judged "no action", which is
@@ -195,10 +184,11 @@ skill's flow; don't improvise a fan-out that drops this step.)
    atomic temp+rename) with the thread's **current** `updatedAt` — re-read it *after*
    posting, since your own comment bumps it:
    ```bash
-   f="$(key "<owner>/<repo>#<n>")"
-   U=$(gh {issue|pr} view <n> -R <owner/repo> --json updatedAt -q .updatedAt)   # current, post-action
-   tmp="$(mktemp)"; jq -n --arg u "$U" '{updatedAt:$u}' > "$tmp" && mv "$tmp" "$f"
+   ${CLAUDE_PLUGIN_ROOT}/scripts/ledger-write.sh <owner/repo> <n> {issue|pr}
    ```
+   (`scripts/ledger-write.sh` re-reads the thread's post-action `updatedAt` and
+   writes the per-key file atomically — the single source of truth, so the jq is
+   never re-inlined in md or in the workflow prompt.)
    New activity after our signature bumps `updatedAt` → the fast-skip misses → the
    item is re-handled, exactly when it should be. The signed comment stays the durable
    correctness record; the ledger is purely the efficiency cache (safe to lose). Skip
