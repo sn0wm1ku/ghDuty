@@ -29,6 +29,26 @@ is "done" — one uniform check for every item type, no local state, no timestam
 gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 ```
 
+### OSBR standards — load before handling (scripted, not optional)
+
+Run this once up front so every `/code-review` and `/ticket` the workers run is
+grounded in OSBR's own written standards, not the model's assumptions:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/fetch-handbook.sh
+```
+
+It caches the OSBR handbook policies (development guide, per-language style
+guides, non-functional requirements, security policy, database & infra
+guidelines, glossary) to `~/.cache/osbr-handbook/` from the source of truth
+`github.com/osbrjp/handbook`. Each per-item subagent (Step 3/4) must read the
+policy that fits its item and apply it: for a **review request**, weigh the PR
+against the matching style guide + `security-policy.md`, and cite the standard a
+finding rests on; for a **ticket**, shape the implementation plan to the
+relevant policy (style guide, NFR, database/infra guidelines) so the ticket
+tells the implementer to build to OSBR standard. If the fetch fails, note it and
+proceed on general judgement.
+
 ## Step 0 — bootstrap (pure configuration, no run-state)
 
 Bootstrap checks **configuration**. Correctness never depends on local state —

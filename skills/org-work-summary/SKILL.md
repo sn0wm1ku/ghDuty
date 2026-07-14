@@ -46,6 +46,26 @@ range is computed, not hard-coded).
 gh auth status >/dev/null 2>&1 && echo OK || echo "run: gh auth login"
 ```
 
+### OSBR standards — load before judging (scripted, not optional)
+
+Run this **before** judging any work, so quality is graded against OSBR's own
+written standards rather than the model's assumptions:
+
+```bash
+${CLAUDE_PLUGIN_ROOT}/scripts/fetch-handbook.sh
+```
+
+It caches the OSBR handbook policies (development guide, per-language style
+guides, non-functional requirements, security policy, database & infra
+guidelines, technical glossary) to `~/.cache/osbr-handbook/` from the source of
+truth `github.com/osbrjp/handbook`. When judging a PR's quality and done-ness —
+**and in every `schedule-planner` subagent you fan out** — read the relevant
+cached policy and weigh the work against it (security-policy for
+security-sensitive PRs, the matching language style guide for code quality, the
+NFR doc for performance/reliability claims, database/infra guidelines for those
+layers). Name the policy a judgement rests on. If the fetch fails (offline),
+say so in the report and fall back to general judgement.
+
 ## Step 0 — bootstrap (config only)
 
 - **`GHDUTY_ORG`** — the GitHub org login to summarize. If unset, **ask the user**

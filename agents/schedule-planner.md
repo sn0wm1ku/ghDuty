@@ -43,6 +43,17 @@ description alone. A description is a claim; the diff is the fact.
    gh issue view <issue#> -R <owner/repo> --json title,body,milestone   # when linked
    ```
 
+   **Weigh the diff against OSBR's written standards.** The `org-work-summary`
+   run caches them to `~/.cache/osbr-handbook/` (from `github.com/osbrjp/handbook`);
+   read the policy that fits this PR — the matching language style guide,
+   `security-policy.md` for security-sensitive changes,
+   `predefining-non-functional-requirements.md` for perf/reliability claims,
+   `database-guidelines.md` / `infra-planning-policy.md` for those layers — and let
+   your done-ness and quality verdicts cite the specific standard met or missed,
+   not a generic impression. If the cache is absent, run
+   `${CLAUDE_PLUGIN_ROOT}/scripts/fetch-handbook.sh` or note it's unavailable and
+   judge generally.
+
 3. **Judge by state.**
 
    ### Open / not merged → PROGRESS
