@@ -54,7 +54,7 @@ const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** 
 2. Read the thread: gh ${it.isPR ? 'pr' : 'issue'} view ${it.number} -R ${it.repo} --comments
 3. IDEMPOTENCY: if a comment with signature "auto-posted by sn0wm1ku/ghDuty" exists with NOTHING newer after it → action="skipped-signed".
 4. STALENESS: if srcs is exactly ["mention"] and the mentioning comment's created_at is >2 years ago → action="skipped-stale". (assigned/review handled regardless of age.)
-5. CLASSIFY & ACT (sign every posted comment with the signature block below):
+5. CLASSIFY & ACT (sign every posted comment with the signature block below). Every judgement obeys the OSBR engineering handbook cached at ~/.cache/osbr-handbook/ (source: github.com/osbrjp/handbook): reviews weigh the PR against the matching style-guide-*.md + security-policy.md + code-review.md and CITE the standard each finding rests on; tickets shape the plan to the relevant policy (style guide, NFR, database/infra). Cache missing → note it, proceed on general judgement.
    - assigned ISSUE with a linked PR → ack comment on the issue, action="acked".
    - assigned ISSUE, no PR → run workaholic /ticket in the repo clone under \${GHDUTY_WORK_DIR:-$HOME/Projects}/${it.repo}, push a ghduty/ticket-* branch via MCP, signed comment; action="ticketed", set branch.
    - assigned OPEN PR → read diff + linked issue; gap → ticket (as above, "ticketed"); already shipped → signed comment suggesting close ("acked").
