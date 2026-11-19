@@ -48,7 +48,7 @@ log(`${items.length} items to handle · ${fastSkipped} fast-skipped by ledger (d
 
 // ── Handle: one agent per item ───────────────────────────────────────────────
 phase('Handle')
-const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** (isPR=${it.isPR}, via: ${(it.srcs || []).join('+')}, updatedAt=${it.updatedAt || '?'}). Act autonomously, no questions. All remote writes via the GitHub MCP (add_issue_comment / create_branch / create_or_update_file / pull_request_review_write) — never git push / gh write.
+const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** (isPR=${it.isPR}, via: ${(it.srcs || []).join('+')}, updatedAt=${it.updatedAt || '?'}). Act autonomously, no questions. Post comments and submit PR reviews via gh CLI (gh issue comment / gh pr comment / gh pr review --approve) — the GitHub MCP tools (mcp__plugin_github_github__* / mcp__claude_ai_github__*) have proven unreliable in this run (not loadable in spawned agents, or 404 on some repos/orgs) so do NOT depend on them for comment/review writes. Ticket branch creation (create_branch / create_or_update_file) still goes via the GitHub MCP — never raw \`git push\`.
 
 1. OWNERSHIP GATE FIRST: gh api repos/${it.repo} --jq .permissions ; if the user is not owner/collaborator (push/admin), return action="skipped-not-mine", post nothing.
 2. Read the thread: gh ${it.isPR ? 'pr' : 'issue'} view ${it.number} -R ${it.repo} --comments
@@ -58,7 +58,7 @@ const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** 
    - assigned ISSUE with a linked PR → ack comment on the issue, action="acked".
    - assigned ISSUE, no PR → run workaholic /ticket in the repo clone under \${GHDUTY_WORK_DIR:-$HOME/Projects}/${it.repo}, push a ghduty/ticket-* branch via MCP, signed comment; action="ticketed", set branch.
    - assigned OPEN PR → read diff + linked issue; gap → ticket (as above, "ticketed"); already shipped → signed comment suggesting close ("acked").
-   - review-requested (or a comment asking for review) → run /code-review, post findings signed. If LGTM / no blocking findings, ALSO submit a real approval via pull_request_review_write (method create, event APPROVE) → action="approved"; if blocking, request changes / comment → action="reviewed".
+   - review-requested (or a comment asking for review) → run /code-review, post findings signed. If LGTM / no blocking findings, ALSO submit a real approval via \`gh pr review ${it.number} -R ${it.repo} --approve --body <signed body>\` → action="approved"; if blocking, request changes / comment → action="reviewed".
    - mention asking something → reply (or ticket+reply if a change request), signed → "replied".
    - nothing to do → action="skipped-noaction", post nothing.
 6. RECORD in the ledger for EVERY terminal verdict — acted (ack/reply/review/approve/
