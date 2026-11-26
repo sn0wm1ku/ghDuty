@@ -78,7 +78,7 @@ const handle = (it) => `ghDuty per-item handler for **${it.repo}#${it.number}** 
 
 Signature block to append to every posted comment:
 ---
-<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-4-8)</sub>`
+<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-5-5)</sub>`
 
 const results = (await parallel(items.map(it => () =>
   agent(handle(it), { label: `${it.repo}#${it.number}`, schema: RESULT, agentType: 'general-purpose' })
