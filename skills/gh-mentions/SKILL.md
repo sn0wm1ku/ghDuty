@@ -306,7 +306,7 @@ check keys on. Fill `<model>` with the model you're running as:
 <reply body>
 
 ---
-<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-4-8)</sub>
+<sub>🤖 auto-posted by [sn0wm1ku/ghDuty](https://github.com/sn0wm1ku/ghDuty) · co-authored by Claude (claude-opus-5-5)</sub>
 ```
 
 Post it with `mcp__plugin_github_github__add_issue_comment` (works for issues and
